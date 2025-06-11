@@ -5,6 +5,7 @@ on:
     paths:
       - 'aws-lambda-jwt/**'
       - 'jwt-validation-lib/**'
+      - 'pom.xml'
     branches: [ main ]
   workflow_dispatch:  # Permite execução manual
 
@@ -29,19 +30,36 @@ jobs:
         distribution: 'temurin'
         cache: maven
         
+    - name: Install Parent POM
+      run: |
+        echo "📦 Installing parent POM..."
+        mvn clean install -N -B
+        echo "✅ Parent POM installed"
+        
     - name: Build JWT Validation Library
       run: |
+        echo "📦 Building JWT Validation Library..."
         cd jwt-validation-lib
         mvn clean install -DskipTests -B
+        echo "✅ JWT Validation Library built"
         
     - name: Build Lambda package
       run: |
+        echo "📦 Building Lambda package..."
         cd aws-lambda-jwt
         mvn clean package -DskipTests -B
         
         # Lista os arquivos criados
         echo "📦 Arquivos criados:"
         ls -la target/
+        
+        # Verifica se o JAR foi criado
+        if ls target/aws-lambda-jwt-*.jar 1> /dev/null 2>&1; then
+            echo "✅ Lambda JAR criado com sucesso"
+        else
+            echo "❌ Erro: Lambda JAR não foi criado"
+            exit 1
+        fi
         
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -54,9 +72,21 @@ jobs:
       run: |
         cd aws-lambda-jwt
         
-        # Encontra o JAR criado
-        LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar | head -n 1)
+        # Encontra o JAR criado (versão shaded)
+        LAMBDA_JAR=$(ls target/aws-lambda-jwt-*-shaded.jar 2>/dev/null | head -n 1)
+        
+        # Se não encontrar shaded, tenta o JAR normal
+        if [ -z "$LAMBDA_JAR" ]; then
+            LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar | head -n 1)
+        fi
+        
         echo "🚀 Deploying: $LAMBDA_JAR"
+        
+        # Verifica se o arquivo existe
+        if [ ! -f "$LAMBDA_JAR" ]; then
+            echo "❌ Erro: Arquivo $LAMBDA_JAR não encontrado"
+            exit 1
+        fi
         
         # Update Lambda function code
         aws lambda update-function-code \
@@ -82,7 +112,7 @@ jobs:
         echo "📋 Lambda response:"
         cat response.json
         
-    - name: Get Function URL
+    - name: Test Function URL
       run: |
         echo "🌐 Getting Function URL..."
         FUNCTION_URL=$(aws lambda get-function-url-config \
@@ -96,4 +126,5 @@ jobs:
         curl -X POST "$FUNCTION_URL" \
           -H "Content-Type: application/json" \
           -d '{"token": "test-jwt-token", "test": true}' \
-          || echo "❌ HTTP test failed (expected for placeholder code)" 
+          -w "\n📊 Status: %{http_code}\n" \
+          || echo "❌ HTTP test completed (may fail with placeholder code)" 
