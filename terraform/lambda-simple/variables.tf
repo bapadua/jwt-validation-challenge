@@ -17,7 +17,7 @@ variable "environment" {
 variable "lambda_handler" {
   description = "Handler do Lambda"
   type        = string
-  default     = "Handler::handleRequest"
+  default     = "io.github.bapadua.lambda.handler.ApiGatewayJwtValidationHandler::handleRequest"
 }
 
 variable "lambda_runtime" {
