@@ -102,6 +102,21 @@ jobs:
           
         echo "✅ Lambda deployed successfully!"
         
+    - name: Update Lambda Configuration
+      run: |
+        echo "⚙️ Updating Lambda handler configuration..."
+        
+        # Atualiza o handler para usar o ApiGatewayJwtValidationHandler
+        aws lambda update-function-configuration \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+          --handler "io.github.bapadua.lambda.handler.ApiGatewayJwtValidationHandler::handleRequest"
+          
+        # Aguarda a atualização completar
+        aws lambda wait function-updated \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          
+        echo "✅ Lambda handler configuration updated!"
+        
     - name: Test Lambda function
       run: |
         echo "🧪 Testing Lambda function..."
