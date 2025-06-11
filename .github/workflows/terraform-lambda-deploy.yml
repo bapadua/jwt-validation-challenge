@@ -188,4 +188,88 @@ jobs:
         echo 'curl -X POST '"$FUNCTION_URL"' \' >> $GITHUB_STEP_SUMMARY
         echo '  -H "Content-Type: application/json" \' >> $GITHUB_STEP_SUMMARY
         echo '  -d '\''{"token": "YOUR_JWT_TOKEN"}'\''' >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY 
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        
+    - name: 🎉 Success Notification
+      if: success()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        custom_payload: |
+          {
+            "channel": "#deploys",
+            "username": "GitHub Actions",
+            "icon_emoji": ":rocket:",
+            "attachments": [{
+              "color": "good",
+              "title": "🎉 JWT Lambda Deploy - SUCCESS",
+              "fields": [
+                {
+                  "title": "Repository",
+                  "value": "${{ github.repository }}",
+                  "short": true
+                },
+                {
+                  "title": "Branch",
+                  "value": "${{ github.ref_name }}",
+                  "short": true
+                },
+                {
+                  "title": "Commit", 
+                  "value": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>",
+                  "short": true
+                },
+                {
+                  "title": "Function URL",
+                  "value": "${{ env.FUNCTION_URL }}",
+                  "short": false
+                }
+              ],
+              "footer": "Deployed successfully! 🚀",
+              "ts": ${{ github.event.head_commit.timestamp }}
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        
+    - name: ❌ Failure Notification
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        custom_payload: |
+          {
+            "channel": "#deploys",
+            "username": "GitHub Actions",
+            "icon_emoji": ":x:",
+            "attachments": [{
+              "color": "danger",
+              "title": "❌ JWT Lambda Deploy - FAILED",
+              "fields": [
+                {
+                  "title": "Repository",
+                  "value": "${{ github.repository }}",
+                  "short": true
+                },
+                {
+                  "title": "Branch", 
+                  "value": "${{ github.ref_name }}",
+                  "short": true
+                },
+                {
+                  "title": "Commit",
+                  "value": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>",
+                  "short": true
+                },
+                {
+                  "title": "Logs",
+                  "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Logs>",
+                  "short": false
+                }
+              ],
+              "footer": "Deploy failed - check logs for details 🔍",
+              "ts": ${{ github.event.head_commit.timestamp }}
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} 
