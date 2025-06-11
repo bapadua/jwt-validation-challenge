@@ -106,14 +106,20 @@ jobs:
       run: |
         echo "🧪 Testing Lambda function..."
         
+        # Cria arquivo temporário com payload de teste
+        echo '{"token": "test-jwt-token", "test": true}' > test-payload.json
+        
         # Test with sample JWT
         aws lambda invoke \
           --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-          --payload '{"token": "test-jwt-token", "test": true}' \
+          --payload file://test-payload.json \
           response.json
           
         echo "📋 Lambda response:"
         cat response.json
+        
+        # Limpa arquivo temporário
+        rm test-payload.json
         
     - name: Test Function URL
       run: |
