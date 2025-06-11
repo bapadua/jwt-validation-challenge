@@ -81,7 +81,7 @@ public class JwtLambdaService {
     
     /**
      * Extrai o token JWT do evento do API Gateway
-     * Procura em diferentes locais: headers, query parameters e body
+     * Procura em diferentes locais: headers, query parameters, path parameters e body
      */
     private String extractTokenFromApiGatewayEvent(APIGatewayProxyRequestEvent event) {
         // 1. Procura no header Authorization
@@ -117,7 +117,28 @@ public class JwtLambdaService {
             }
         }
         
-        // 4. Se não encontrou em lugar nenhum, retorna null
+        // 4. Procura no body (JSON)
+        String body = event.getBody();
+        if (body != null && !body.trim().isEmpty()) {
+            try {
+                // Parser JSON simples para extrair token
+                if (body.contains("\"token\"")) {
+                    // Busca por "token":"valor" ou "token": "valor"
+                    String[] parts = body.split("\"token\"\\s*:\\s*\"");
+                    if (parts.length > 1) {
+                        String tokenPart = parts[1];
+                        int endIndex = tokenPart.indexOf("\"");
+                        if (endIndex > 0) {
+                            return tokenPart.substring(0, endIndex);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // Se falhar no parse do JSON, continua sem o token do body
+            }
+        }
+        
+        // 5. Se não encontrou em lugar nenhum, retorna null
         return null;
     }
     
