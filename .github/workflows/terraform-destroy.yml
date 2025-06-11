@@ -7,6 +7,11 @@ on:
         description: 'Digite "DESTROY" para confirmar a destruição'
         required: true
         type: string
+      force_import:
+        description: 'Tentar importar recursos existentes antes de destruir?'
+        required: false
+        type: boolean
+        default: false
 
 env:
   AWS_REGION: us-east-1
@@ -47,26 +52,118 @@ jobs:
         cd terraform/lambda-simple
         terraform init
         
+    - name: Check Terraform State
+      run: |
+        echo "📊 Checking Terraform state..."
+        cd terraform/lambda-simple
+        echo "Current state:"
+        terraform state list || echo "No resources in state"
+        echo ""
+        echo "Terraform show:"
+        terraform show || echo "No state to show"
+        
+    - name: Check AWS Resources
+      run: |
+        echo "🔍 Checking existing AWS resources..."
+        echo "Lambda functions:"
+        aws lambda list-functions --query 'Functions[?FunctionName==`jwt-validator`].[FunctionName,FunctionArn]' --output table || echo "No Lambda functions found"
+        echo ""
+        echo "Function URLs:"
+        aws lambda list-function-url-configs --function-name jwt-validator --output table 2>/dev/null || echo "No function URLs found"
+        
+    - name: Import Resources (if requested)
+      if: github.event.inputs.force_import == 'true'
+      run: |
+        echo "📥 Attempting to import existing resources..."
+        cd terraform/lambda-simple
+        
+        # Tentar importar a função Lambda
+        if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
+          echo "Importing Lambda function..."
+          terraform import aws_lambda_function.jwt_lambda jwt-validator || echo "Failed to import Lambda function"
+        fi
+        
+        # Tentar importar Function URL
+        if aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1; then
+          echo "Importing Function URL..."
+          terraform import aws_lambda_function_url.jwt_lambda_url jwt-validator || echo "Failed to import Function URL"
+        fi
+        
+        echo "State after import:"
+        terraform state list
+        
     - name: Terraform Plan Destroy
       run: |
         echo "📋 Planning destruction..."
         cd terraform/lambda-simple
-        terraform plan -destroy -detailed-exitcode
-      continue-on-error: true
+        terraform plan -destroy -detailed-exitcode -out=destroy.plan
+        echo "Plan created successfully"
+      id: plan_destroy
       
+    - name: Show Destroy Plan
+      run: |
+        echo "📋 Showing destroy plan..."
+        cd terraform/lambda-simple
+        terraform show destroy.plan
+        
     - name: Terraform Destroy
       run: |
         echo "🗑️ Destroying infrastructure..."
         cd terraform/lambda-simple
-        terraform destroy -auto-approve
+        
+        # Se o estado estiver vazio, tentar destruição manual via AWS CLI
+        if [ -z "$(terraform state list)" ]; then
+          echo "⚠️ Estado Terraform vazio. Tentando destruição manual via AWS CLI..."
+          
+          # Deletar Function URL
+          echo "Deleting Function URL..."
+          aws lambda delete-function-url-config --function-name jwt-validator 2>/dev/null || echo "Function URL não encontrada ou já deletada"
+          
+          # Deletar Lambda Function
+          echo "Deleting Lambda Function..."
+          aws lambda delete-function --function-name jwt-validator 2>/dev/null || echo "Lambda function não encontrada ou já deletada"
+          
+        else
+          echo "Destroying via Terraform..."
+          terraform destroy -auto-approve
+        fi
+        
+    - name: Verify Cleanup
+      run: |
+        echo "🔍 Verificando se os recursos foram removidos..."
+        
+        # Verificar Lambda
+        if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
+          echo "❌ Lambda function ainda existe!"
+          aws lambda get-function --function-name jwt-validator --query 'Configuration.[FunctionName,State]' --output table
+        else
+          echo "✅ Lambda function removida com sucesso"
+        fi
+        
+        # Verificar Function URL
+        if aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1; then
+          echo "❌ Function URL ainda existe!"
+        else
+          echo "✅ Function URL removida com sucesso"
+        fi
         
     - name: Cleanup Summary
       run: |
         echo "## 🗑️ Cleanup Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Infrastructure**: Destroyed via Terraform" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Lambda Function**: Removed" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Function URL**: Removed" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **IAM Role**: Removed" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "💰 **Cost**: ~$0/month (resources deleted)" >> $GITHUB_STEP_SUMMARY 
+        
+        # Verificar se recursos ainda existem
+        LAMBDA_EXISTS=$(aws lambda get-function --function-name jwt-validator >/dev/null 2>&1 && echo "exists" || echo "deleted")
+        URL_EXISTS=$(aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1 && echo "exists" || echo "deleted")
+        
+        if [ "$LAMBDA_EXISTS" = "deleted" ] && [ "$URL_EXISTS" = "deleted" ]; then
+          echo "✅ **Status**: Todos os recursos foram removidos com sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Lambda Function**: Removida" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Function URL**: Removida" >> $GITHUB_STEP_SUMMARY
+          echo "💰 **Cost**: ~$0/month (recursos deletados)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Status**: Alguns recursos ainda existem" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Function**: $LAMBDA_EXISTS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Function URL**: $URL_EXISTS" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Ação necessária**: Verificar manualmente no console AWS" >> $GITHUB_STEP_SUMMARY
+        fi 
