@@ -33,6 +33,11 @@ public class DefaultJwtClaimsValidator implements JwtClaimsValidator {
         this.primeNumberValidator = primeNumberValidator;
     }
     
+    /**
+     * Valida as claims do JWT
+     * @param claims - Map<String, String> - As claims do JWT
+     * @return boolean - true se as claims são válidas, false caso contrário
+     */
     @Override
     public boolean validateClaims(Map<String, String> claims) {
         // Deve conter exatamente 3 claims (Name, Role e Seed)

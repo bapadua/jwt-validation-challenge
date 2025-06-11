@@ -2,6 +2,9 @@ package io.github.bapadua.lambda.service;
 
 import io.github.bapadua.jwt.lib.service.DefaultJwtValidationService;
 import io.github.bapadua.jwt.lib.service.JwtValidationService;
+import io.github.bapadua.jwt.lib.service.impl.DefaultJwtClaimsExtractor;
+import io.github.bapadua.jwt.lib.service.impl.DefaultJwtClaimsValidator;
+import io.github.bapadua.jwt.lib.service.impl.DefaultPrimeNumberValidator;
 import io.github.bapadua.lambda.model.JwtValidationRequest;
 import io.github.bapadua.lambda.model.JwtValidationResponse;
 
@@ -16,7 +19,13 @@ public class JwtLambdaService {
     private final JwtValidationService jwtValidationService;
     
     public JwtLambdaService() {
-        this.jwtValidationService = new DefaultJwtValidationService();
+        // Cria as dependências necessárias para o DefaultJwtValidationService
+        DefaultPrimeNumberValidator primeValidator = new DefaultPrimeNumberValidator();
+        DefaultJwtClaimsExtractor claimsExtractor = new DefaultJwtClaimsExtractor();
+        DefaultJwtClaimsValidator claimsValidator = new DefaultJwtClaimsValidator(primeValidator);
+        
+        // Inicializa o serviço de validação com as dependências
+        this.jwtValidationService = new DefaultJwtValidationService(claimsExtractor, claimsValidator);
     }
     
     /**

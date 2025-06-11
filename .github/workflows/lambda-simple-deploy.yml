@@ -72,13 +72,8 @@ jobs:
       run: |
         cd aws-lambda-jwt
         
-        # Encontra o JAR criado (versão shaded)
-        LAMBDA_JAR=$(ls target/aws-lambda-jwt-*-shaded.jar 2>/dev/null | head -n 1)
-        
-        # Se não encontrar shaded, tenta o JAR normal
-        if [ -z "$LAMBDA_JAR" ]; then
-            LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar | head -n 1)
-        fi
+        # Encontra o JAR criado (o Maven Shade substitui o original)
+        LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar 2>/dev/null | head -n 1)
         
         echo "🚀 Deploying: $LAMBDA_JAR"
         
@@ -86,6 +81,14 @@ jobs:
         if [ ! -f "$LAMBDA_JAR" ]; then
             echo "❌ Erro: Arquivo $LAMBDA_JAR não encontrado"
             exit 1
+        fi
+        
+        # Verifica se o JAR tem tamanho adequado (deve ser > 1MB com dependências)
+        JAR_SIZE=$(stat -c%s "$LAMBDA_JAR" 2>/dev/null || stat -f%z "$LAMBDA_JAR" 2>/dev/null || echo "0")
+        echo "📦 Tamanho do JAR: $(echo "$JAR_SIZE" | awk '{printf "%.1f MB", $1/1024/1024}')"
+        
+        if [ "$JAR_SIZE" -lt 1000000 ]; then
+            echo "⚠️  Aviso: JAR parece pequeno demais, pode estar sem dependências"
         fi
         
         # Update Lambda function code
