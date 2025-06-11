@@ -7,6 +7,15 @@ on:
         description: 'Digite "DESTROY" para confirmar a destruição'
         required: true
         type: string
+      terraform_directory:
+        description: 'Diretório Terraform (lambda-simple ou root)'
+        required: false
+        type: choice
+        options:
+          - 'auto-detect'
+          - 'lambda-simple'
+          - 'root'
+        default: 'auto-detect'
       force_import:
         description: 'Tentar importar recursos existentes antes de destruir?'
         required: false
@@ -46,16 +55,48 @@ jobs:
       with:
         terraform_version: ${{ env.TERRAFORM_VERSION }}
         
+    - name: Detect Terraform Configuration
+      id: detect_config
+      run: |
+        echo "🔍 Detectando configuração Terraform correta..."
+        
+        # Verificar recursos AWS existentes
+        echo "Verificando Lambda functions existentes:"
+        LAMBDA_FUNCTIONS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text)
+        echo "Lambda functions encontradas: $LAMBDA_FUNCTIONS"
+        
+        # Determinar qual configuração usar
+        if [ "${{ github.event.inputs.terraform_directory }}" = "auto-detect" ]; then
+          # Verificar se há recursos que indicam uso da configuração completa
+          if echo "$LAMBDA_FUNCTIONS" | grep -q "jwt-project"; then
+            TERRAFORM_DIR="terraform"
+            echo "📍 Detectado: Configuração completa (terraform/)"
+          elif echo "$LAMBDA_FUNCTIONS" | grep -q "jwt-validator"; then
+            TERRAFORM_DIR="terraform/lambda-simple"
+            echo "📍 Detectado: Configuração simples (terraform/lambda-simple/)"
+          else
+            echo "⚠️ Nenhuma função Lambda JWT encontrada. Usando configuração simples como padrão."
+            TERRAFORM_DIR="terraform/lambda-simple"
+          fi
+        elif [ "${{ github.event.inputs.terraform_directory }}" = "root" ]; then
+          TERRAFORM_DIR="terraform"
+        else
+          TERRAFORM_DIR="terraform/lambda-simple"
+        fi
+        
+        echo "TERRAFORM_DIR=$TERRAFORM_DIR" >> $GITHUB_OUTPUT
+        echo "🎯 Usando diretório: $TERRAFORM_DIR"
+        
     - name: Terraform Init
       run: |
         echo "🏗️ Initializing Terraform..."
-        cd terraform/lambda-simple
+        cd ${{ steps.detect_config.outputs.TERRAFORM_DIR }}
         terraform init
         
     - name: Check Terraform State
       run: |
         echo "📊 Checking Terraform state..."
-        cd terraform/lambda-simple
+        cd ${{ steps.detect_config.outputs.TERRAFORM_DIR }}
         echo "Current state:"
         terraform state list || echo "No resources in state"
         echo ""
@@ -65,28 +106,58 @@ jobs:
     - name: Check AWS Resources
       run: |
         echo "🔍 Checking existing AWS resources..."
-        echo "Lambda functions:"
-        aws lambda list-functions --query 'Functions[?FunctionName==`jwt-validator`].[FunctionName,FunctionArn]' --output table || echo "No Lambda functions found"
-        echo ""
-        echo "Function URLs:"
-        aws lambda list-function-url-configs --function-name jwt-validator --output table 2>/dev/null || echo "No function URLs found"
+        
+        # Lambda functions
+        echo "=== Lambda Functions ==="
+        LAMBDA_FUNCTIONS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)]' --output table 2>/dev/null || echo "No Lambda functions found")
+        echo "$LAMBDA_FUNCTIONS"
+        
+        # Function URLs
+        echo -e "\n=== Function URLs ==="
+        for func in $(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text 2>/dev/null); do
+          if [ -n "$func" ]; then
+            echo "Checking Function URL for: $func"
+            aws lambda get-function-url-config --function-name "$func" --output table 2>/dev/null || echo "No function URL for $func"
+          fi
+        done
+        
+        # ECS Clusters (se usando configuração completa)
+        echo -e "\n=== ECS Clusters ==="
+        aws ecs list-clusters --query 'clusterArns[?contains(@, `jwt`)]' --output table 2>/dev/null || echo "No ECS clusters found"
+        
+        # RDS Instances
+        echo -e "\n=== RDS Instances ==="
+        aws rds describe-db-instances --query 'DBInstances[?contains(DBName, `jwt`)].DBInstanceIdentifier' --output table 2>/dev/null || echo "No RDS instances found"
         
     - name: Import Resources (if requested)
       if: github.event.inputs.force_import == 'true'
       run: |
         echo "📥 Attempting to import existing resources..."
-        cd terraform/lambda-simple
+        cd ${{ steps.detect_config.outputs.TERRAFORM_DIR }}
         
-        # Tentar importar a função Lambda
-        if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
-          echo "Importing Lambda function..."
-          terraform import aws_lambda_function.jwt_lambda jwt-validator || echo "Failed to import Lambda function"
-        fi
+        # Listar funções Lambda
+        LAMBDA_FUNCTIONS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text 2>/dev/null || echo "")
         
-        # Tentar importar Function URL
-        if aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1; then
-          echo "Importing Function URL..."
-          terraform import aws_lambda_function_url.jwt_lambda_url jwt-validator || echo "Failed to import Function URL"
+        if [ "${{ steps.detect_config.outputs.TERRAFORM_DIR }}" = "terraform/lambda-simple" ]; then
+          # Configuração simples
+          echo "Importando para configuração simples..."
+          
+          if echo "$LAMBDA_FUNCTIONS" | grep -q "jwt-validator"; then
+            echo "Importing Lambda function jwt-validator..."
+            terraform import aws_lambda_function.jwt_lambda jwt-validator || echo "Failed to import Lambda function"
+            
+            # Tentar importar Function URL
+            if aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1; then
+              echo "Importing Function URL..."
+              terraform import aws_lambda_function_url.jwt_lambda_url jwt-validator || echo "Failed to import Function URL"
+            fi
+          fi
+          
+        else
+          # Configuração completa
+          echo "Importando para configuração completa..."
+          echo "⚠️ Import para configuração completa requer mais complexidade."
+          echo "Recomendado: Use AWS CLI diretamente para esta configuração."
         fi
         
         echo "State after import:"
@@ -95,33 +166,71 @@ jobs:
     - name: Terraform Plan Destroy
       run: |
         echo "📋 Planning destruction..."
-        cd terraform/lambda-simple
+        cd ${{ steps.detect_config.outputs.TERRAFORM_DIR }}
         terraform plan -destroy -detailed-exitcode -out=destroy.plan
         echo "Plan created successfully"
       id: plan_destroy
+      continue-on-error: true
       
     - name: Show Destroy Plan
+      if: steps.plan_destroy.outcome == 'success'
       run: |
         echo "📋 Showing destroy plan..."
-        cd terraform/lambda-simple
+        cd ${{ steps.detect_config.outputs.TERRAFORM_DIR }}
         terraform show destroy.plan
         
     - name: Terraform Destroy
       run: |
         echo "🗑️ Destroying infrastructure..."
-        cd terraform/lambda-simple
+        cd ${{ steps.detect_config.outputs.TERRAFORM_DIR }}
         
-        # Se o estado estiver vazio, tentar destruição manual via AWS CLI
-        if [ -z "$(terraform state list)" ]; then
-          echo "⚠️ Estado Terraform vazio. Tentando destruição manual via AWS CLI..."
+        # Se o plan falhou ou estado está vazio, usar AWS CLI
+        if [ "${{ steps.plan_destroy.outcome }}" != "success" ] || [ -z "$(terraform state list)" ]; then
+          echo "⚠️ Terraform plan falhou ou estado vazio. Usando destruição manual via AWS CLI..."
           
-          # Deletar Function URL
-          echo "Deleting Function URL..."
-          aws lambda delete-function-url-config --function-name jwt-validator 2>/dev/null || echo "Function URL não encontrada ou já deletada"
+          # Listar e deletar Lambda functions
+          echo "=== Removendo Lambda Functions ==="
+          LAMBDA_FUNCTIONS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text 2>/dev/null || echo "")
           
-          # Deletar Lambda Function
-          echo "Deleting Lambda Function..."
-          aws lambda delete-function --function-name jwt-validator 2>/dev/null || echo "Lambda function não encontrada ou já deletada"
+          for func in $LAMBDA_FUNCTIONS; do
+            if [ -n "$func" ]; then
+              echo "Removendo Function URL para: $func"
+              aws lambda delete-function-url-config --function-name "$func" 2>/dev/null || echo "Function URL não encontrada"
+              
+              echo "Removendo Lambda Function: $func"
+              aws lambda delete-function --function-name "$func" 2>/dev/null || echo "Lambda function não encontrada"
+            fi
+          done
+          
+          # Se for configuração completa, remover outros recursos
+          if [ "${{ steps.detect_config.outputs.TERRAFORM_DIR }}" = "terraform" ]; then
+            echo "=== Removendo recursos da configuração completa ==="
+            
+            # ECS Services
+            ECS_CLUSTERS=$(aws ecs list-clusters --query 'clusterArns[?contains(@, `jwt`)]' --output text 2>/dev/null || echo "")
+            for cluster in $ECS_CLUSTERS; do
+              if [ -n "$cluster" ]; then
+                cluster_name=$(basename "$cluster")
+                echo "Removendo ECS Services do cluster: $cluster_name"
+                
+                SERVICES=$(aws ecs list-services --cluster "$cluster_name" --query 'serviceArns' --output text 2>/dev/null || echo "")
+                for service in $SERVICES; do
+                  if [ -n "$service" ]; then
+                    service_name=$(basename "$service")
+                    echo "Deletando ECS Service: $service_name"
+                    aws ecs update-service --cluster "$cluster_name" --service "$service_name" --desired-count 0 2>/dev/null || echo "Failed to scale down"
+                    aws ecs delete-service --cluster "$cluster_name" --service "$service_name" --force 2>/dev/null || echo "Failed to delete service"
+                  fi
+                done
+                
+                echo "Deletando ECS Cluster: $cluster_name"
+                aws ecs delete-cluster --cluster "$cluster_name" 2>/dev/null || echo "Failed to delete cluster"
+              fi
+            done
+            
+            echo "⚠️ Outros recursos (RDS, VPC, etc.) podem precisar ser removidos manualmente."
+            echo "💡 Considere usar 'terraform destroy' na configuração completa com estado adequado."
+          fi
           
         else
           echo "Destroying via Terraform..."
@@ -132,38 +241,57 @@ jobs:
       run: |
         echo "🔍 Verificando se os recursos foram removidos..."
         
-        # Verificar Lambda
-        if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
-          echo "❌ Lambda function ainda existe!"
-          aws lambda get-function --function-name jwt-validator --query 'Configuration.[FunctionName,State]' --output table
+        # Verificar Lambda functions
+        echo "=== Verificando Lambda Functions ==="
+        REMAINING_LAMBDAS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text 2>/dev/null || echo "")
+        
+        if [ -n "$REMAINING_LAMBDAS" ]; then
+          echo "❌ Lambda functions ainda existem:"
+          for func in $REMAINING_LAMBDAS; do
+            echo "  - $func"
+            aws lambda get-function --function-name "$func" --query 'Configuration.[FunctionName,State,LastModified]' --output table 2>/dev/null || echo "Error getting function details"
+          done
         else
-          echo "✅ Lambda function removida com sucesso"
+          echo "✅ Todas as Lambda functions foram removidas"
         fi
         
-        # Verificar Function URL
-        if aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1; then
-          echo "❌ Function URL ainda existe!"
-        else
-          echo "✅ Function URL removida com sucesso"
+        # Verificar ECS (se configuração completa)
+        if [ "${{ steps.detect_config.outputs.TERRAFORM_DIR }}" = "terraform" ]; then
+          echo -e "\n=== Verificando ECS Resources ==="
+          ECS_CLUSTERS=$(aws ecs list-clusters --query 'clusterArns[?contains(@, `jwt`)]' --output text 2>/dev/null || echo "")
+          if [ -n "$ECS_CLUSTERS" ]; then
+            echo "❌ ECS Clusters ainda existem: $ECS_CLUSTERS"
+          else
+            echo "✅ ECS Clusters foram removidos"
+          fi
         fi
         
     - name: Cleanup Summary
       run: |
         echo "## 🗑️ Cleanup Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Configuração utilizada**: \`${{ steps.detect_config.outputs.TERRAFORM_DIR }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         
         # Verificar se recursos ainda existem
-        LAMBDA_EXISTS=$(aws lambda get-function --function-name jwt-validator >/dev/null 2>&1 && echo "exists" || echo "deleted")
-        URL_EXISTS=$(aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1 && echo "exists" || echo "deleted")
+        LAMBDA_EXISTS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text 2>/dev/null)
         
-        if [ "$LAMBDA_EXISTS" = "deleted" ] && [ "$URL_EXISTS" = "deleted" ]; then
-          echo "✅ **Status**: Todos os recursos foram removidos com sucesso" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Lambda Function**: Removida" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Function URL**: Removida" >> $GITHUB_STEP_SUMMARY
+        if [ -z "$LAMBDA_EXISTS" ]; then
+          echo "✅ **Status**: Todos os recursos Lambda foram removidos com sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Lambda Functions**: Removidas" >> $GITHUB_STEP_SUMMARY
           echo "💰 **Cost**: ~$0/month (recursos deletados)" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ **Status**: Alguns recursos ainda existem" >> $GITHUB_STEP_SUMMARY
-          echo "- **Lambda Function**: $LAMBDA_EXISTS" >> $GITHUB_STEP_SUMMARY
-          echo "- **Function URL**: $URL_EXISTS" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️ **Ação necessária**: Verificar manualmente no console AWS" >> $GITHUB_STEP_SUMMARY
+          echo "**Lambda Functions restantes**: \`$LAMBDA_EXISTS\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Próximos Passos" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verificar no console AWS se há recursos órfãos" >> $GITHUB_STEP_SUMMARY
+          echo "2. Considerar executar novamente com \`force_import: true\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Verificar se há dependências externas impedindo a remoção" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ steps.detect_config.outputs.TERRAFORM_DIR }}" = "terraform" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Atenção**: Configuração completa pode ter recursos adicionais (RDS, VPC, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "Verificar manualmente no console AWS se necessário." >> $GITHUB_STEP_SUMMARY
         fi 
