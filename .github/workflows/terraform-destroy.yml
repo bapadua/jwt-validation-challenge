@@ -1,0 +1,72 @@
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:  # Apenas execução manual
+    inputs:
+      confirm_destroy:
+        description: 'Digite "DESTROY" para confirmar a destruição'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  terraform-destroy:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Validate confirmation
+      run: |
+        if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+          echo "❌ Confirmação incorreta. Digite exatamente 'DESTROY' para confirmar."
+          exit 1
+        fi
+        echo "✅ Confirmação válida. Procedendo com a destruição..."
+    
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Terraform Init
+      run: |
+        echo "🏗️ Initializing Terraform..."
+        cd terraform/lambda-simple
+        terraform init
+        
+    - name: Terraform Plan Destroy
+      run: |
+        echo "📋 Planning destruction..."
+        cd terraform/lambda-simple
+        terraform plan -destroy -detailed-exitcode
+      continue-on-error: true
+      
+    - name: Terraform Destroy
+      run: |
+        echo "🗑️ Destroying infrastructure..."
+        cd terraform/lambda-simple
+        terraform destroy -auto-approve
+        
+    - name: Cleanup Summary
+      run: |
+        echo "## 🗑️ Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Infrastructure**: Destroyed via Terraform" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Lambda Function**: Removed" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Function URL**: Removed" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **IAM Role**: Removed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "💰 **Cost**: ~$0/month (resources deleted)" >> $GITHUB_STEP_SUMMARY 
