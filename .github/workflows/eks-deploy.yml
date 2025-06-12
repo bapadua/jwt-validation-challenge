@@ -137,6 +137,40 @@ jobs:
         cd terraform/eks
         terraform init
     
+    - name: Clean Previous State
+      run: |
+        cd terraform/eks
+        echo "🧹 Limpando estado anterior..."
+        
+        # Remove arquivos de estado local se existirem
+        rm -f .terraform.tfstate.lock.info
+        rm -f .terraform.tfstate.backup
+        
+        # Verifica se há locks ativos e remove
+        echo "🔍 Verificando locks ativos..."
+        LOCK_COUNT=$(aws dynamodb scan \
+          --table-name jwt-api-terraform-locks \
+          --select COUNT \
+          --query 'Count' \
+          --output text 2>/dev/null || echo "0")
+        
+        if [ "$LOCK_COUNT" -gt 0 ]; then
+          echo "⚠️ Encontrados $LOCK_COUNT locks ativos. Removendo..."
+          aws dynamodb scan \
+            --table-name jwt-api-terraform-locks \
+            --query 'Items[].LockID.S' \
+            --output text | tr '\t' '\n' | while read -r lock_id; do
+            if [ -n "$lock_id" ]; then
+              echo "🔓 Removendo lock: $lock_id"
+              aws dynamodb delete-item \
+                --table-name jwt-api-terraform-locks \
+                --key "{\"LockID\":{\"S\":\"$lock_id\"}}" && echo "✅ Lock removido" || echo "❌ Falha ao remover lock"
+            fi
+          done
+        else
+          echo "✅ Nenhum lock ativo encontrado"
+        fi
+    
     - name: Check and Clear Terraform Locks
       run: |
         cd terraform/eks
@@ -227,9 +261,22 @@ jobs:
       continue-on-error: true
       run: |
         cd terraform/eks
+        echo "🔨 Iniciando Terraform Plan..."
+        echo "📋 Variáveis:"
+        echo "  - Environment: ${{ needs.prepare.outputs.environment }}"
+        echo "  - AWS Region: ${{ env.AWS_REGION }}"
+        
+        # Remove plan anterior se existir
+        rm -f tfplan
+        
+        # Executa o plan com logs detalhados
+        echo "🚀 Executando terraform plan..."
         terraform plan -var="environment=${{ needs.prepare.outputs.environment }}" \
                       -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD || 'admin123Change' }}" \
-                      -out=tfplan
+                      -out=tfplan -detailed-exitcode
+        
+        PLAN_EXIT_CODE=$?
+        echo "📊 Exit code do terraform plan: $PLAN_EXIT_CODE"
         
         # Verifica se o plan foi gerado com sucesso
         if [ ! -f "tfplan" ]; then
@@ -239,12 +286,26 @@ jobs:
         
         # Verifica se o arquivo tem conteúdo válido
         PLAN_SIZE=$(stat -c%s tfplan 2>/dev/null || stat -f%z tfplan 2>/dev/null || echo "0")
+        echo "📏 Tamanho do arquivo tfplan: $PLAN_SIZE bytes"
+        
         if [ "$PLAN_SIZE" -eq 0 ]; then
           echo "❌ Arquivo tfplan está vazio. Falha no plan."
           exit 1
         fi
         
-        echo "✅ Plan gerado com sucesso. Tamanho: $PLAN_SIZE bytes"
+        # Verifica o exit code do terraform plan
+        if [ "$PLAN_EXIT_CODE" -eq 0 ]; then
+          echo "✅ Plan gerado com sucesso (sem mudanças)"
+        elif [ "$PLAN_EXIT_CODE" -eq 1 ]; then
+          echo "❌ Erro durante o plan"
+          exit 1
+        elif [ "$PLAN_EXIT_CODE" -eq 2 ]; then
+          echo "✅ Plan gerado com sucesso (com mudanças)"
+        else
+          echo "⚠️ Exit code inesperado: $PLAN_EXIT_CODE"
+        fi
+        
+        echo "✅ Plan finalizado com sucesso. Tamanho: $PLAN_SIZE bytes"
     
     - name: Upload Terraform Plan
       uses: actions/upload-artifact@v4
