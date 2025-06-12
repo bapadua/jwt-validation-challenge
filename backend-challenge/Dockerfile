@@ -1,28 +1,40 @@
 # Multi-stage build para otimizar o tamanho da imagem
 FROM eclipse-temurin:21-jdk-alpine AS builder
 
-# Instalar dependências de build
-RUN apk add --no-cache curl
+# Instalar dependências de build incluindo Maven
+RUN apk add --no-cache curl maven
 
 WORKDIR /app
 
-# Copiar arquivos de configuração Maven
-COPY pom.xml ./
-COPY ../jwt-validation-lib/pom.xml ./jwt-validation-lib/
-COPY ../pom.xml ./parent/
+# Copiar arquivos de configuração Maven do projeto pai
+COPY pom.xml ./pom.xml
 
-# Cache de dependências Maven
+# Copiar arquivos de configuração Maven de todos os módulos
+COPY jwt-validation-lib/pom.xml ./jwt-validation-lib/pom.xml
+COPY backend-challenge/pom.xml ./backend-challenge/pom.xml
+COPY aws-lambda-jwt/pom.xml ./aws-lambda-jwt/pom.xml
+
+# Cache de dependências Maven - fazer download das dependências do projeto pai
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn dependency:go-offline -B
+    mvn dependency:go-offline -B -f pom.xml
 
-# Copiar código fonte
-COPY src ./src
-COPY ../jwt-validation-lib ./jwt-validation-lib
+# Copiar código fonte de todos os módulos necessários
+COPY jwt-validation-lib/src ./jwt-validation-lib/src
+COPY backend-challenge/src ./backend-challenge/src
+COPY aws-lambda-jwt/src ./aws-lambda-jwt/src
 
-# Build da aplicação
+# Instalar o projeto pai no repositório local Maven primeiro
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn clean package -DskipTests -B && \
-    mv target/*.jar app.jar
+    mvn clean install -N -DskipTests -B
+
+# Build da jwt-validation-lib primeiro (install para colocar no repositório local)
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn clean install -pl jwt-validation-lib -DskipTests -B
+
+# Build da aplicação backend-challenge
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn clean package -pl backend-challenge -DskipTests -B && \
+    mv backend-challenge/target/*.jar app.jar
 
 # Estágio de produção
 FROM eclipse-temurin:21-jre-alpine AS runtime
@@ -44,6 +56,9 @@ COPY --from=builder --chown=appuser:appgroup /app/app.jar ./app.jar
 
 # Configurar usuário
 USER appuser
+
+# Definir variável de ambiente para a porta
+ENV SERVER_PORT=8080
 
 # Expor porta
 EXPOSE 8080

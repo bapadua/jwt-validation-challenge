@@ -1,0 +1,450 @@
+## Configurações para kube-prometheus-stack
+
+## Configurações globais
+global:
+  evaluation_interval: 1m
+  scrape_interval: 1m
+  scrape_timeout: 10s
+
+## Configurações do Grafana
+grafana:
+  enabled: true
+  adminPassword: "${grafana_admin_password}"
+  
+  # Persistência para manter dashboards e configurações
+  persistence:
+    enabled: true
+    size: 10Gi
+  
+  # Opções de exposição
+  service:
+    type: ClusterIP
+  
+  # Dashboards pré-configurados
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+  
+  # Adiciona dashboards
+  dashboards:
+    default:
+      # Spring Boot dashboard
+      spring-boot:
+        gnetId: 11378
+        revision: 1
+        datasource: Prometheus
+      
+      # JVM dashboard
+      jvm-dashboard:
+        gnetId: 4701
+        revision: 1
+        datasource: Prometheus
+        
+      # Kubernetes dashboard
+      k8s-system-dashboard:
+        gnetId: 10856
+        revision: 1
+        datasource: Prometheus
+      
+      # JWT API Custom Dashboard
+      jwt-api:
+        json: |-
+          {
+            "annotations": {
+              "list": [
+                {
+                  "builtIn": 1,
+                  "datasource": "-- Grafana --",
+                  "enable": true,
+                  "hide": true,
+                  "iconColor": "rgba(0, 211, 255, 1)",
+                  "name": "Annotations & Alerts",
+                  "type": "dashboard"
+                }
+              ]
+            },
+            "editable": true,
+            "gnetId": null,
+            "graphTooltip": 0,
+            "id": null,
+            "links": [],
+            "panels": [
+              {
+                "datasource": "Prometheus",
+                "fieldConfig": {
+                  "defaults": {
+                    "color": {
+                      "mode": "palette-classic"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        }
+                      ]
+                    },
+                    "unit": "short"
+                  },
+                  "overrides": []
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+                },
+                "id": 2,
+                "options": {
+                  "colorMode": "value",
+                  "graphMode": "area",
+                  "justifyMode": "auto",
+                  "orientation": "auto",
+                  "reduceOptions": {
+                    "calcs": ["mean"],
+                    "fields": "",
+                    "values": false
+                  },
+                  "text": {},
+                  "textMode": "auto"
+                },
+                "pluginVersion": "8.0.6",
+                "targets": [
+                  {
+                    "expr": "sum(rate(http_server_requests_seconds_count{job=\"jwt-validation-api\"}[5m]))",
+                    "interval": "",
+                    "legendFormat": "Requisições por segundo",
+                    "refId": "A"
+                  }
+                ],
+                "title": "Taxa de Requisições",
+                "type": "stat"
+              },
+              {
+                "datasource": "Prometheus",
+                "fieldConfig": {
+                  "defaults": {
+                    "color": {
+                      "mode": "palette-classic"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 0.3
+                        }
+                      ]
+                    },
+                    "unit": "s"
+                  },
+                  "overrides": []
+                },
+                "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 0
+                },
+                "id": 4,
+                "options": {
+                  "colorMode": "value",
+                  "graphMode": "area",
+                  "justifyMode": "auto",
+                  "orientation": "auto",
+                  "reduceOptions": {
+                    "calcs": ["mean"],
+                    "fields": "",
+                    "values": false
+                  },
+                  "text": {},
+                  "textMode": "auto"
+                },
+                "pluginVersion": "8.0.6",
+                "targets": [
+                  {
+                    "expr": "max(http_server_requests_seconds_sum{job=\"jwt-validation-api\", status!~\"5.*\"} / http_server_requests_seconds_count{job=\"jwt-validation-api\", status!~\"5.*\"})",
+                    "interval": "",
+                    "legendFormat": "Tempo médio de resposta",
+                    "refId": "A"
+                  }
+                ],
+                "title": "Tempo Médio de Resposta",
+                "type": "stat"
+              },
+              {
+                "aliasColors": {},
+                "bars": false,
+                "dashLength": 10,
+                "dashes": false,
+                "datasource": "Prometheus",
+                "fill": 1,
+                "fillGradient": 0,
+                "gridPos": {
+                  "h": 8,
+                  "w": 24,
+                  "x": 0,
+                  "y": 8
+                },
+                "hiddenSeries": false,
+                "id": 6,
+                "legend": {
+                  "alignAsTable": true,
+                  "avg": true,
+                  "current": true,
+                  "max": true,
+                  "min": true,
+                  "show": true,
+                  "total": false,
+                  "values": true
+                },
+                "lines": true,
+                "linewidth": 1,
+                "links": [],
+                "nullPointMode": "connected",
+                "options": {
+                  "dataLinks": []
+                },
+                "percentage": false,
+                "pointradius": 2,
+                "points": false,
+                "renderer": "flot",
+                "seriesOverrides": [],
+                "spaceLength": 10,
+                "stack": false,
+                "steppedLine": false,
+                "targets": [
+                  {
+                    "expr": "sum(rate(http_server_requests_seconds_count{job=\"jwt-validation-api\"}[1m])) by (status)",
+                    "format": "time_series",
+                    "intervalFactor": 1,
+                    "legendFormat": "{{ status }}",
+                    "refId": "A"
+                  }
+                ],
+                "thresholds": [],
+                "timeFrom": null,
+                "timeRegions": [],
+                "timeShift": null,
+                "title": "Requisições por Código de Status",
+                "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+                },
+                "type": "graph",
+                "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": []
+                },
+                "yaxes": [
+                  {
+                    "format": "short",
+                    "label": null,
+                    "logBase": 1,
+                    "max": null,
+                    "min": null,
+                    "show": true
+                  },
+                  {
+                    "format": "short",
+                    "label": null,
+                    "logBase": 1,
+                    "max": null,
+                    "min": null,
+                    "show": true
+                  }
+                ],
+                "yaxis": {
+                  "align": false,
+                  "alignLevel": null
+                }
+              },
+              {
+                "aliasColors": {},
+                "bars": false,
+                "dashLength": 10,
+                "dashes": false,
+                "datasource": "Prometheus",
+                "fill": 1,
+                "fillGradient": 0,
+                "gridPos": {
+                  "h": 8,
+                  "w": 24,
+                  "x": 0,
+                  "y": 16
+                },
+                "hiddenSeries": false,
+                "id": 8,
+                "legend": {
+                  "alignAsTable": true,
+                  "avg": true,
+                  "current": true,
+                  "max": true,
+                  "min": true,
+                  "show": true,
+                  "total": false,
+                  "values": true
+                },
+                "lines": true,
+                "linewidth": 1,
+                "links": [],
+                "nullPointMode": "connected",
+                "options": {
+                  "dataLinks": []
+                },
+                "percentage": false,
+                "pointradius": 2,
+                "points": false,
+                "renderer": "flot",
+                "seriesOverrides": [],
+                "spaceLength": 10,
+                "stack": false,
+                "steppedLine": false,
+                "targets": [
+                  {
+                    "expr": "process_resident_memory_bytes{job=\"jwt-validation-api\"}/1024/1024",
+                    "format": "time_series",
+                    "intervalFactor": 1,
+                    "legendFormat": "Resident Memory",
+                    "refId": "A"
+                  }
+                ],
+                "thresholds": [],
+                "timeFrom": null,
+                "timeRegions": [],
+                "timeShift": null,
+                "title": "Uso de Memória (MB)",
+                "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+                },
+                "type": "graph",
+                "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": []
+                },
+                "yaxes": [
+                  {
+                    "format": "short",
+                    "label": null,
+                    "logBase": 1,
+                    "max": null,
+                    "min": null,
+                    "show": true
+                  },
+                  {
+                    "format": "short",
+                    "label": null,
+                    "logBase": 1,
+                    "max": null,
+                    "min": null,
+                    "show": true
+                  }
+                ],
+                "yaxis": {
+                  "align": false,
+                  "alignLevel": null
+                }
+              }
+            ],
+            "refresh": "10s",
+            "schemaVersion": 30,
+            "style": "dark",
+            "tags": [],
+            "templating": {
+              "list": []
+            },
+            "time": {
+              "from": "now-6h",
+              "to": "now"
+            },
+            "timepicker": {},
+            "timezone": "browser",
+            "title": "JWT API Dashboard",
+            "uid": "jwt-api",
+            "version": 1
+          }
+  
+  # Plugins adicionais
+  plugins:
+    - grafana-piechart-panel
+    - grafana-worldmap-panel
+  
+  # Configurações adicionais
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki-stack-gateway.logging:80
+      access: proxy
+      isDefault: false
+
+## Prometheus Operator
+prometheusOperator:
+  enabled: true
+  manageCrds: true
+  
+## Prometheus
+prometheus:
+  enabled: true
+  serviceMonitorSelector: {}
+  serviceMonitorNamespaceSelector: {}
+  serviceMonitorSelectorNilUsesHelmValues: false
+  
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 10d
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 500m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+## Alertmanager
+alertmanager:
+  enabled: true
+  
+## kube-state-metrics
+kubeStateMetrics:
+  enabled: true
+  
+## node-exporter
+nodeExporter:
+  enabled: true
+  
+## Configurações do Adapter para métricas personalizadas
+kubeApiServer:
+  enabled: true 

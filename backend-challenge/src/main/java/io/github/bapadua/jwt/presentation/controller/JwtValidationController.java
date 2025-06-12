@@ -54,10 +54,7 @@ public class JwtValidationController {
      */
     @GetMapping("/validate-param")
     @ValidateJwt
-    public ResponseEntity<Boolean> validateJwtFromParam(@RequestParam("jwt") String jwt) {// Se chegou até aqui, o JWT
-                                                                                          // foi validado
-                                                                                          // automaticamente pela
-                                                                                          // anotação
+    public ResponseEntity<Boolean> validateJwtFromParam(@RequestParam("jwt") String jwt) {// Se chegou até aqui, o JWT                                                                             // automaticamente pela                                                 // anotação
         return ResponseEntity.ok(true);
     }
 
@@ -70,7 +67,6 @@ public class JwtValidationController {
     @GetMapping("/validate-path/{token}")
     @ValidateJwt
     public ResponseEntity<Boolean> validateJwtFromPath(@PathVariable("token") String token) {
-        // Se chegou até aqui, o JWT foi validado automaticamente pela anotação
         return ResponseEntity.ok(true);
     }
 

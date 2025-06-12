@@ -3,20 +3,24 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "jwt-validation-api.fullname" . }}
+  {{- with .Values.monitoring.serviceMonitor.namespace }}
+  namespace: {{ . }}
+  {{- end }}
   labels:
     {{- include "jwt-validation-api.labels" . | nindent 4 }}
     {{- with .Values.monitoring.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-  {{- if .Values.monitoring.serviceMonitor.namespace }}
-  namespace: {{ .Values.monitoring.serviceMonitor.namespace }}
-  {{- end }}
 spec:
-  selector:
-    matchLabels:
-      {{- include "jwt-validation-api.selectorLabels" . | nindent 6 }}
   endpoints:
   - port: http
     path: {{ .Values.monitoring.serviceMonitor.path }}
     interval: {{ .Values.monitoring.serviceMonitor.interval }}
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "jwt-validation-api.selectorLabels" . | nindent 6 }}
 {{- end }} 

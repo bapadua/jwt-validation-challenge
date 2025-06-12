@@ -17,6 +17,12 @@ spec:
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.monitoring.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.service.targetPort }}"
+        prometheus.io/path: "{{ .Values.monitoring.serviceMonitor.path }}"
+      {{- end }}
       labels:
         {{- include "jwt-validation-api.selectorLabels" . | nindent 8 }}
     spec:
@@ -33,17 +39,23 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.app.springProfiles | quote }}
+            - name: SERVER_PORT
+              value: {{ .Values.app.port | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.app.javaOpts | quote }}
+            {{- if .Values.monitoring.enabled }}
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: "health,info,prometheus,metrics"
+            - name: MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED
+              value: "true"
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.app.port }}
               protocol: TCP
-          env:
-            - name: SERVER_PORT
-              value: "{{ .Values.app.port }}"
-            - name: SPRING_PROFILES_ACTIVE
-              value: "{{ .Values.app.springProfiles }}"
-            - name: JAVA_OPTS
-              value: "{{ .Values.app.javaOpts }}"
           {{- if .Values.healthcheck.enabled }}
           livenessProbe:
             {{- toYaml .Values.healthcheck.livenessProbe | nindent 12 }}

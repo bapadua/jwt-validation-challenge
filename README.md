@@ -1,238 +1,606 @@
-# JWT Validation Project - CI/CD Architecture
+# JWT Validation API - Documentação Consolidada
 
-Este projeto implementa uma arquitetura completa de **pipelines independentes** usando GitHub Actions para:
+Este projeto implementa uma API REST para validação de JSON Web Tokens (JWT) com múltiplas opções de deploy e infraestrutura.
 
-- 📦 **JWT Validation Library** (biblioteca compartilhada)
-- 🚀 **Backend API** (Spring Boot)
-- ⚡ **AWS Lambda** (função serverless)
+## 📋 Índice
 
-## 🏗️ Arquitetura de Pipelines
+- [Visão Geral](#visão-geral)
+- [Arquitetura](#arquitetura)
+- [Backend Challenge](#backend-challenge)
+- [Infraestrutura EKS](#infraestrutura-eks)
+- [Infraestrutura Lambda](#infraestrutura-lambda)
+- [Deploy com Helm](#deploy-com-helm)
+- [Notificações](#notificações)
+- [Troubleshooting](#troubleshooting)
 
-### **1. Pipeline Independente por Componente**
+## 🎯 Visão Geral
 
-Cada componente possui seu próprio workflow com **path filters** inteligentes:
+O projeto oferece múltiplas formas de executar a API JWT:
 
-```yaml
-# Exemplo de path filter
-on:
-  push:
-    paths:
-      - 'jwt-validation-lib/**'  # Executa apenas para mudanças na lib
-      - 'backend-challenge/**'   # Executa apenas para mudanças na API
-      - 'aws-lambda-jwt/**'      # Executa apenas para mudanças no Lambda
+1. **Docker Simples** - Para desenvolvimento e testes rápidos
+2. **AWS Lambda** - Para serverless com baixo custo
+3. **AWS EKS** - Para produção com Kubernetes
+4. **Helm Charts** - Para deploy em qualquer cluster Kubernetes
+
+## 🏗️ Arquitetura
+
+### Componentes Principais
+
+- **API JWT**: Aplicação Spring Boot para validação de tokens
+- **Terraform**: Infraestrutura como código para AWS
+- **Helm**: Charts para deploy em Kubernetes
+- **GitHub Actions**: CI/CD automatizado
+- **Monitoramento**: Prometheus/Grafana para métricas
+
+## 🚀 Backend Challenge
+
+### Execução via Docker
+
+#### Pré-requisitos
+- Docker 20.10+
+- Internet (para download da imagem)
+
+#### Quick Start
+```bash
+# Executar com imagem do Docker Hub
+docker run -d -p 8090:8080 --name backend-api bapadua/backend-api:latest
+
+# Verificar se está funcionando
+curl http://localhost:8090/actuator/health
 ```
 
-### **2. Workflows Criados**
+#### Build Local (se necessário)
+```bash
+# Clone do repositório
+git clone <repository-url>
+cd josewebtoken
 
-| Workflow | Arquivo | Trigger | Função |
-|----------|---------|---------|--------|
-| **JWT Library** | `.github/workflows/jwt-validation-lib.yml` | Mudanças em `jwt-validation-lib/` | Build, test e publish da biblioteca |
-| **Backend API** | `.github/workflows/backend-api.yml` | Mudanças em `backend-challenge/` | Build, test, Docker e deploy da API |
-| **AWS Lambda** | `.github/workflows/aws-lambda.yml` | Mudanças em `aws-lambda-jwt/` | Build, test e deploy do Lambda |
-| **Monitoring** | `.github/workflows/monitoring.yml` | Schedule (5 min) | Monitoramento contínuo |
+# Build da imagem
+docker build -f backend-challenge/Dockerfile -t bapadua/backend-api:latest .
 
-## 🚀 Fluxo de Deploy
-
-### **Branch Strategy**
-
-```mermaid
-graph TD
-    A[develop] -->|PR| B[main]
-    B -->|Auto Deploy| C[Production]
-    A -->|Auto Deploy| D[Staging]
-    
-    style A fill:#ffd43b
-    style B fill:#28a745  
-    style C fill:#dc3545
-    style D fill:#17a2b8
+# Executar
+docker run -d -p 8090:8080 --name backend-api bapadua/backend-api:latest
 ```
 
-- **`develop`** → Deploy automático para **Staging**
-- **`main`** → Deploy automático para **Production**
+#### Configuração Customizada
+```bash
+# Executar em porta diferente
+docker run -d -p 3000:8080 --name backend-api bapadua/backend-api:latest
 
-### **Dependency Flow**
-
-```mermaid
-graph TD
-    A[jwt-validation-lib] --> B[backend-challenge]
-    A --> C[aws-lambda-jwt]
-    
-    style A fill:#28a745
-    style B fill:#17a2b8
-    style C fill:#ffc107
+# Com variáveis de ambiente
+docker run -d \
+  -p 8090:8080 \
+  -e SERVER_PORT=8080 \
+  -e SPRING_PROFILES_ACTIVE=docker \
+  --name backend-api \
+  bapadua/backend-api:latest
 ```
 
-## 📦 Estratégia de Build
+#### Gerenciamento do Container
+```bash
+# Verificar status
+docker ps
 
-### **1. JWT Validation Library**
+# Ver logs
+docker logs backend-api
 
-```yaml
-# Sempre buildar primeiro (é dependência)
-- name: Build JWT Validation Library
-  run: |
-    cd jwt-validation-lib
-    mvn clean install -DskipTests -B
+# Parar e remover
+docker stop backend-api && docker rm backend-api
 ```
 
-### **2. Backend API**
+### Endpoints Disponíveis
 
-```yaml
-# Multi-stage Docker build otimizado
-- name: Build and push Docker image
-  uses: docker/build-push-action@v5
-  with:
-    context: backend-challenge
-    platforms: linux/amd64,linux/arm64
-    cache-from: type=gha
-    cache-to: type=gha,mode=max
+- `GET /actuator/health` - Health check
+- `GET /actuator/info` - Informações da aplicação
+- `GET /api/jwt/validate-optional` - Endpoint principal
+
+## ☁️ Infraestrutura EKS
+
+### Pré-requisitos
+
+- AWS CLI configurado com credenciais válidas
+- Terraform v1.5+
+- kubectl instalado
+- Helm instalado
+
+### Permissões AWS Necessárias
+
+O usuário ou role IAM deve ter permissões para:
+- Criar e gerenciar recursos de VPC
+- Gerenciar clusters EKS e grupos de nós
+- Configurar load balancers
+- Gerenciar serviços de monitoramento
+- Configurar backend do Terraform (S3 e DynamoDB)
+
+#### Criar Política IAM
+```bash
+aws iam create-policy \
+  --policy-name TerraformEKSPolicy \
+  --policy-document file://terraform/eks/aws-terraform-policy.json
+
+aws iam attach-user-policy \
+  --user-name seu-usuario \
+  --policy-arn arn:aws:iam::sua-conta:policy/TerraformEKSPolicy
 ```
 
-### **3. AWS Lambda**
+### Recursos Criados
 
-```yaml
-# Package com versionamento automático
-- name: Build Lambda package
-  run: |
-    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-    COMMIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-    LAMBDA_ZIP="jwt-lambda-${TIMESTAMP}-${COMMIT_SHA}.zip"
+- VPC com subnets públicas e privadas
+- EKS Cluster com grupos de nós gerenciados
+- AWS Load Balancer Controller
+- Stack Prometheus/Grafana para monitoramento
+- Deployment da API JWT
+
+### Deploy Manual
+
+1. **Inicializar recursos AWS para o backend Terraform**
+```bash
+chmod +x ./terraform/eks/init-aws.sh
+./terraform/eks/init-aws.sh
 ```
 
-## 🔧 Configuração Necessária
-
-### **GitHub Secrets**
-
-#### **AWS (para Lambda)**
-```
-AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY
-LAMBDA_FUNCTION_NAME_STAGING
-LAMBDA_FUNCTION_NAME_PROD
-LAMBDA_DEPLOYMENT_BUCKET
+2. **Inicializar o Terraform**
+```bash
+cd terraform/eks
+terraform init
 ```
 
-#### **Backend API**
-```
-BACKEND_API_URL
-DOCKER_REGISTRY_USERNAME
-DOCKER_REGISTRY_PASSWORD
-```
-
-#### **Monitoramento**
-```
-SLACK_WEBHOOK_URL
-TEST_VALID_JWT
+3. **Planejar e aplicar**
+```bash
+terraform plan -var="environment=dev" -var="grafana_admin_password=sua_senha_segura" -out=tfplan
+terraform apply tfplan
 ```
 
-### **GitHub Environments**
-
-Configure environments no GitHub:
-
-1. **staging** - Aprovação automática
-2. **production** - Aprovação manual obrigatória
-
-## 🏃‍♂️ Como Usar
-
-### **Deploy Automático**
-
-1. **Commit para `develop`**:
-   ```bash
-   git checkout develop
-   git add jwt-validation-lib/
-   git commit -m "feat: nova validação de JWT"
-   git push origin develop
-   ```
-   → **Resultado**: Deploy automático para staging
-
-2. **Merge para `main`**:
-   ```bash  
-   git checkout main
-   git merge develop
-   git push origin main
-   ```
-   → **Resultado**: Deploy automático para production (após aprovação)
-
-### **Deploy Manual**
-
-Trigger manual via GitHub Actions UI:
-- Acesse **Actions** → Escolha o workflow → **Run workflow**
-
-## 📊 Monitoramento
-
-### **Monitoramento Automático (a cada 5 minutos)**
-
-- ✅ Health check das APIs
-- ✅ Test de funcionalidade JWT
-- ✅ Métricas do CloudWatch
-- ✅ Alertas via Slack
-- ✅ Testes de performance
-
-### **Métricas Coletadas**
-
-| Componente | Métricas |
-|------------|----------|
-| **Lambda** | Duration, Errors, Invocations, Memory |
-| **API** | HTTP Status, Response Time, Database |
-| **Library** | Test Coverage, Build Success |
-
-## 🔄 Otimizações Implementadas
-
-### **Cache Inteligente**
-
-```yaml
-# Cache de dependências Maven
-- uses: actions/cache@v3
-  with:
-    path: ~/.m2
-    key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+4. **Configurar kubectl**
+```bash
+aws eks update-kubeconfig --name jwt-api-cluster --region us-east-1
 ```
 
-### **Builds Paralelos**
+### Deploy via GitHub Actions
 
-- Workflows executam **independentemente**
-- Docker builds com **multi-stage** otimizado
-- **Path filters** evitam builds desnecessários
+Use o workflow `eks-deploy.yml` que pode ser acionado:
+- Automático ao fazer push no branch main
+- Manual via GitHub Actions UI
 
-### **Segurança**
+#### Secrets necessários no GitHub
+- `AWS_ACCESS_KEY_ID`: ID da chave de acesso AWS
+- `AWS_SECRET_ACCESS_KEY`: Chave secreta de acesso AWS
+- `GRAFANA_ADMIN_PASSWORD`: Senha para o usuário admin do Grafana
 
-- ✅ Container images **sem root**
-- ✅ Vulnerability scanning com **Trivy**
-- ✅ Secrets management adequado
-- ✅ SARIF reports no GitHub Security
+### Monitoramento
 
-## 🎯 Vantagens da Arquitetura
+#### Dashboards Inclusos
+- **JWT API Dashboard**: Métricas específicas da API JWT
+- **JVM Dashboard**: Métricas da JVM para aplicações Spring Boot
+- **Kubernetes Dashboards**: Estado do cluster, nós e pods
 
-| Vantagem | Descrição |
-|----------|-----------|
-| **🔀 Independência** | Pipelines executam apenas quando necessário |
-| **⚡ Performance** | Builds paralelos e cache otimizado |
-| **🛡️ Segurança** | Environments protegidos e scanning automático |
-| **📈 Observabilidade** | Monitoramento contínuo e alertas |
-| **🔄 Eficiência** | Zero deployments desnecessários |
+#### Acessando o Grafana
+Após a implantação, o Grafana estará disponível em:
+```
+https://monitoring.jwt-demo.com
+```
 
-## 🚦 Pipeline Status
+Credenciais padrão:
+- **Usuário**: admin
+- **Senha**: (definida na variável `grafana_admin_password`)
 
-Para verificar o status de todos os pipelines:
+#### Métricas Coletadas
+A aplicação expõe métricas via endpoint Prometheus em `/actuator/prometheus`:
+- Taxa de requisições
+- Latência por endpoint
+- Códigos de status HTTP
+- Uso de memória e CPU
+- Tempo de resposta
+- Erros/Exceções
+
+### Limpeza de Recursos
+```bash
+terraform destroy -var="environment=dev" -var="grafana_admin_password=sua_senha_segura"
+```
+
+## ⚡ Infraestrutura Lambda
+
+### Estrutura Minimalista
+
+Esta é uma estrutura **minimalista** do Terraform para criar apenas uma função AWS Lambda para validação JWT.
+
+#### O que é criado
+- ✅ **1 função Lambda** (`jwt-validator`)
+- ✅ **IAM Role** básico
+- ✅ **Function URL** (acesso HTTP direto)
+- ✅ **CORS** configurado
+
+#### Custo Estimado
+- **~$0-5/mês** (apenas Lambda + logs)
+
+### Deploy
+
+1. **Configurar AWS CLI**
+```bash
+aws configure
+```
+
+2. **Deploy**
+```bash
+cd terraform/lambda-simple
+terraform init
+terraform plan
+terraform apply
+```
+
+3. **Testar**
+Após o deploy, o Terraform mostrará a URL da função:
+```bash
+curl -X POST https://abc123.lambda-url.us-east-1.on.aws/ \
+  -H "Content-Type: application/json" \
+  -d '{"test": "hello"}'
+```
+
+4. **Deploy do código real**
+```bash
+# Compile seu JAR primeiro
+aws lambda update-function-code \
+  --function-name jwt-validator \
+  --zip-file fileb://seu-lambda.jar
+```
+
+### Personalização
+
+Edite `terraform/lambda-simple/terraform.tfvars`:
+```hcl
+aws_region = "us-east-1"
+environment = "production"
+lambda_handler = "seu.pacote.Handler::handleRequest"
+lambda_runtime = "java21"
+lambda_timeout = 60
+lambda_memory_size = 1024
+```
+
+### Comandos Úteis
+```bash
+# Ver logs
+aws logs tail /aws/lambda/jwt-validator --follow
+
+# Invocar Lambda
+aws lambda invoke --function-name jwt-validator response.json
+
+# Destruir tudo
+terraform destroy
+```
+
+## 🎯 Deploy com Helm
+
+### Pré-requisitos
+
+- Kubernetes 1.19+
+- Helm 3.2.0+
+- Cluster com pelo menos 1 GB de RAM disponível
+
+### Instalação Básica
 
 ```bash
-# Ver todos os workflows
-gh workflow list
+# Verificar o template
+helm template jwt-api ./backend-challenge/helm/jwt-validation-api
 
-# Ver runs de um workflow específico  
-gh run list --workflow="Backend API CI/CD"
+# Instalar com configurações padrão
+helm install jwt-api ./backend-challenge/helm/jwt-validation-api
 
-# Ver logs de uma run
-gh run view <run-id> --log
+# Ou com namespace específico
+helm install jwt-api ./backend-challenge/helm/jwt-validation-api --namespace jwt-system --create-namespace
+```
+
+### Instalação com Script Helper
+
+```bash
+# Instalar com script auxiliar
+./backend-challenge/helm/install.sh
+
+# Especificar namespace
+./backend-challenge/helm/install.sh -n jwt-system
+
+# Fazer dry-run
+./backend-challenge/helm/install.sh --dry-run
+```
+
+### Instalação com Ingress
+
+```bash
+# Instalação básica com ingress habilitado
+./backend-challenge/helm/install.sh -i
+
+# Configurar hostname do ingress
+./backend-challenge/helm/install.sh -i --ingress-host jwt-api.meudominio.com
+
+# Habilitar TLS (requer cert-manager)
+./backend-challenge/helm/install.sh -i --ingress-host jwt-api.meudominio.com --ingress-tls
+
+# Especificar classe do ingress
+./backend-challenge/helm/install.sh -i --ingress-class istio
+```
+
+### Configurações Principais
+
+| Parâmetro | Descrição | Valor Padrão |
+|-----------|-----------|--------------|
+| `replicaCount` | Número de réplicas | `2` |
+| `image.repository` | Repositório da imagem | `bapadua/backend-api` |
+| `image.tag` | Tag da imagem | `latest` |
+| `service.type` | Tipo do service | `ClusterIP` |
+| `service.port` | Porta do service | `80` |
+| `ingress.enabled` | Habilitar ingress | `false` |
+| `autoscaling.enabled` | Habilitar HPA | `true` |
+| `monitoring.enabled` | Habilitar monitoring | `false` |
+
+### Recursos e Limites
+
+```yaml
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+```
+
+### Acesso à Aplicação
+
+#### Port Forward (Desenvolvimento)
+```bash
+kubectl port-forward svc/jwt-api-jwt-validation-api 8080:80
+```
+Depois acesse: http://localhost:8080
+
+#### Via Ingress
+```bash
+# Configuração básica de ingress
+./backend-challenge/helm/install.sh -i --ingress-host jwt-api.exemplo.com
+
+# Com TLS habilitado
+./backend-challenge/helm/install.sh -i --ingress-host jwt-api.exemplo.com --ingress-tls
+```
+
+### Comandos Úteis
+
+```bash
+# Status do release
+helm status jwt-api
+
+# Logs da aplicação
+kubectl logs -l app.kubernetes.io/name=jwt-validation-api
+
+# Atualizar com novos valores
+helm upgrade jwt-api ./backend-challenge/helm/jwt-validation-api \
+  --set image.tag=v1.1.0
+
+# Remover o release
+helm uninstall jwt-api
+```
+
+## 📢 Notificações
+
+### Configuração Rápida - Slack (Recomendado)
+
+#### 1. Criar Webhook no Slack (2 minutos)
+1. Acesse https://api.slack.com/apps
+2. **"Create New App"** → **"From scratch"**
+3. Nome: `GitHub Deploys` | Workspace: Seu workspace
+4. **"Incoming Webhooks"** → **"Activate Incoming Webhooks"**
+5. **"Add New Webhook to Workspace"** → Escolha canal `#deploys`
+6. **Copie a URL** (ex: `https://hooks.slack.com/services/...`)
+
+#### 2. Configurar Secret no GitHub (1 minuto)
+1. GitHub → Repositório → **Settings** → **Secrets and variables** → **Actions**
+2. **"New repository secret"**
+3. Name: `SLACK_WEBHOOK_URL`
+4. Value: Cole a URL do webhook
+
+### Outras Opções
+
+#### Discord
+```yaml
+- name: Discord Notification
+  uses: sarisia/actions-status-discord@v1
+  with:
+    webhook: ${{ secrets.DISCORD_WEBHOOK }}
+    title: "JWT Lambda Deploy"
+    description: "🚀 Deploy realizado com sucesso!"
+```
+
+#### Email (Gmail)
+```yaml
+- name: Send Email
+  uses: dawidd6/action-send-mail@v3
+  with:
+    server_address: smtp.gmail.com
+    username: ${{ secrets.EMAIL_USERNAME }}
+    password: ${{ secrets.EMAIL_PASSWORD }}
+    to: dev-team@empresa.com
+    subject: "🚀 Deploy Concluído!"
+```
+
+#### Microsoft Teams
+1. Teams → Canal → **"..."** → **Conectores**
+2. **"Incoming Webhook"** → **"Configurar"**
+3. Nome: `GitHub Deploys` → **"Criar"**
+4. **Copiar URL**
+5. GitHub Secret: `TEAMS_WEBHOOK`
+
+#### Telegram
+1. Criar bot: Telegram → @BotFather → `/newbot`
+2. Obter token: `123456:ABC-DEF...`
+3. Obter Chat ID: Envie `/start` para @userinfobot
+4. GitHub Secrets:
+   - `TELEGRAM_BOT_TOKEN`: Token do bot
+   - `TELEGRAM_CHAT_ID`: Seu chat ID
+
+### Comparação Rápida
+
+| Serviço | Esforço | Popularidade | Recursos |
+|---------|---------|--------------|----------|
+| **Slack** | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | Rich formatting, threads, apps |
+| **Discord** | ⭐⭐ | ⭐⭐⭐⭐ | Gaming-friendly, embeds |
+| **Email** | ⭐ | ⭐⭐⭐ | Universal, HTML support |
+| **Teams** | ⭐⭐⭐ | ⭐⭐⭐⭐ | Enterprise, Office 365 |
+| **Telegram** | ⭐⭐ | ⭐⭐⭐ | Instant, lightweight |
+
+## 🔍 Troubleshooting
+
+### Docker
+
+#### Porta já em uso
+```bash
+# Verificar o que está usando a porta
+netstat -tlnp | grep 8090
+
+# Usar porta diferente
+docker run -d -p 8091:8080 --name backend-api bapadua/backend-api:latest
+```
+
+#### Container não inicia
+```bash
+# Ver logs detalhados
+docker logs backend-api
+
+# Executar em modo interativo para debug
+docker run -it --rm -p 8090:8080 bapadua/backend-api:latest
+
+# Verificar se a imagem existe
+docker images | grep bapadua/backend-api
+```
+
+#### Problemas de conectividade
+```bash
+# Testar conectividade
+curl -v http://localhost:8090/actuator/health
+
+# Verificar dentro do container
+docker exec -it backend-api curl localhost:8080/actuator/health
+
+# Verificar se o Docker está rodando
+docker ps
+```
+
+### Kubernetes/Helm
+
+#### Pod não inicia
+```bash
+# Verificar eventos
+kubectl describe pod <pod-name>
+
+# Verificar logs
+kubectl logs <pod-name>
+
+# Verificar configurações
+kubectl get pod <pod-name> -o yaml
+```
+
+#### Problemas de conectividade
+```bash
+# Testar conectividade dentro do cluster
+kubectl run test-pod --image=curlimages/curl --rm -it -- /bin/sh
+curl http://jwt-api-jwt-validation-api/actuator/health
+```
+
+#### Problemas de recursos
+```bash
+# Verificar recursos do cluster
+kubectl top nodes
+kubectl top pods
+
+# Verificar limites
+kubectl describe limitrange
+kubectl describe resourcequota
+```
+
+#### Problemas com Ingress
+```bash
+# Verificar configuração do ingress
+kubectl get ingress -l app.kubernetes.io/name=jwt-validation-api -o yaml
+
+# Verificar eventos do ingress
+kubectl describe ingress <ingress-name>
+
+# Verificar logs do controlador de ingress
+kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx
+```
+
+### AWS/Terraform
+
+#### Problemas de permissões
+```bash
+# Verificar credenciais AWS
+aws sts get-caller-identity
+
+# Testar permissões específicas
+aws eks describe-cluster --name jwt-api-cluster --region us-east-1
+```
+
+#### Problemas de rede
+```bash
+# Verificar VPC e subnets
+aws ec2 describe-vpcs
+aws ec2 describe-subnets
+
+# Verificar security groups
+aws ec2 describe-security-groups
+```
+
+## 📁 Estrutura do Projeto
+
+```
+josewebtoken/
+├── backend-challenge/           # Aplicação Spring Boot
+│   ├── Dockerfile              # Docker para a aplicação
+│   └── helm/                   # Charts Helm
+│       └── jwt-validation-api/ # Chart para Kubernetes
+├── terraform/                  # Infraestrutura como código
+│   ├── eks/                    # Infraestrutura EKS
+│   │   ├── main.tf            # Definição principal
+│   │   ├── variables.tf       # Variáveis
+│   │   ├── outputs.tf         # Outputs
+│   │   ├── init-aws.sh        # Script de inicialização
+│   │   └── aws-terraform-policy.json # Política IAM
+│   └── lambda-simple/         # Infraestrutura Lambda
+│       ├── main.tf            # Recursos Lambda
+│       ├── variables.tf       # Variáveis
+│       └── outputs.tf         # Outputs
+├── .github/workflows/         # CI/CD
+│   ├── eks-deploy.yml         # Deploy EKS
+│   ├── lambda-deploy.yml      # Deploy Lambda
+│   └── terraform-destroy.yml  # Limpeza de recursos
+└── docs/                      # Documentação adicional
+    └── NOTIFICATIONS.md       # Guia de notificações
+```
+
+## 🎯 Quick Start
+
+### Para Desenvolvimento
+```bash
+docker run -d -p 8090:8080 --name backend-api bapadua/backend-api:latest
+curl http://localhost:8090/actuator/health
+```
+
+### Para Produção com EKS
+```bash
+cd terraform/eks
+./init-aws.sh
+terraform init
+terraform apply -var="environment=prod" -var="grafana_admin_password=sua_senha_segura"
+```
+
+### Para Serverless com Lambda
+```bash
+cd terraform/lambda-simple
+terraform init
+terraform apply
+```
+
+### Para Kubernetes com Helm
+```bash
+./backend-challenge/helm/install.sh -i --ingress-host jwt-api.meudominio.com
 ```
 
 ---
 
-## 🎉 Resultado Final
-
-✅ **3 Pipelines Independentes**  
-✅ **Deploy Automático Multi-Environment**  
-✅ **Monitoramento 24/7**  
-✅ **Zero Downtime Deployments**  
-✅ **Segurança e Compliance**
-
-Esta arquitetura garante **máxima eficiência** e **confiabilidade** para o ecossistema JWT completo! 🚀 # Slack notifications configured!
+**🎯 Projeto pronto para produção com múltiplas opções de deploy!** 
