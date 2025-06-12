@@ -137,6 +137,45 @@ jobs:
         cd terraform/eks
         terraform init
     
+    - name: Check and Clear Terraform Locks
+      run: |
+        cd terraform/eks
+        echo "🔍 Verificando locks ativos do Terraform..."
+        
+        # Verifica se há locks ativos
+        LOCK_COUNT=$(aws dynamodb scan \
+          --table-name jwt-api-terraform-locks \
+          --select COUNT \
+          --query 'Count' \
+          --output text 2>/dev/null || echo "0")
+        
+        if [ "$LOCK_COUNT" -gt 0 ]; then
+          echo "⚠️ Encontrados $LOCK_COUNT locks ativos. Removendo..."
+          
+          # Lista locks ativos
+          aws dynamodb scan \
+            --table-name jwt-api-terraform-locks \
+            --select ALL_ATTRIBUTES \
+            --output table || echo "Não foi possível listar locks"
+          
+          # Remove todos os locks (força unlock)
+          aws dynamodb scan \
+            --table-name jwt-api-terraform-locks \
+            --query 'Items[].LockID.S' \
+            --output text | tr '\t' '\n' | while read -r lock_id; do
+            if [ -n "$lock_id" ]; then
+              echo "🔓 Removendo lock: $lock_id"
+              aws dynamodb delete-item \
+                --table-name jwt-api-terraform-locks \
+                --key "{\"LockID\":{\"S\":\"$lock_id\"}}" || echo "Falha ao remover lock: $lock_id"
+            fi
+          done
+          
+          echo "✅ Locks removidos"
+        else
+          echo "✅ Nenhum lock ativo encontrado"
+        fi
+    
     - name: Terraform Plan
       run: |
         cd terraform/eks

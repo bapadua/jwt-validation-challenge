@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "State",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:CreateBucket",
+        "s3:DeleteObject",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable"
+      ],
+      "Resource": [
+        "arn:aws:s3:::jwt-api-terraform-state",
+        "arn:aws:s3:::jwt-api-terraform-state/*",
+        "arn:aws:dynamodb:*:*:table/jwt-api-terraform-locks"
+      ]
+    }
+  ]
+} 

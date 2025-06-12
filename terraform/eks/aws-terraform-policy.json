@@ -10,7 +10,9 @@
         "eks:DescribeCluster",
         "eks:CreateNodegroup",
         "eks:DeleteNodegroup",
-        "eks:DescribeNodegroup"
+        "eks:DescribeNodegroup",
+        "eks:ListClusters",
+        "eks:ListNodegroups"
       ],
       "Resource": "*"
     },
@@ -26,7 +28,28 @@
         "ec2:CreateRouteTable",
         "ec2:CreateInternetGateway",
         "ec2:DescribeVpcs",
-        "ec2:DescribeSubnets"
+        "ec2:DescribeSubnets",
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeRegions",
+        "ec2:DescribeInstances",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeInternetGateways",
+        "ec2:DescribeAccountAttributes",
+        "ec2:DescribeInstanceTypes",
+        "ec2:DescribeKeyPairs",
+        "ec2:CreateTags",
+        "ec2:DeleteTags",
+        "ec2:CreateRoute",
+        "ec2:DeleteRoute",
+        "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupEgress"
       ],
       "Resource": "*"
     },
@@ -38,7 +61,20 @@
         "iam:DeleteRole",
         "iam:PassRole",
         "iam:AttachRolePolicy",
-        "iam:CreateOpenIDConnectProvider"
+        "iam:DetachRolePolicy",
+        "iam:CreateOpenIDConnectProvider",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:GetOpenIDConnectProvider",
+        "iam:TagOpenIDConnectProvider",
+        "iam:CreateServiceLinkedRole",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:GetUser",
+        "iam:GetCallerIdentity"
       ],
       "Resource": "*"
     },
@@ -50,9 +86,12 @@
         "s3:GetObject",
         "s3:PutObject",
         "s3:CreateBucket",
+        "s3:DeleteObject",
         "dynamodb:GetItem",
         "dynamodb:PutItem",
-        "dynamodb:CreateTable"
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable"
       ],
       "Resource": [
         "arn:aws:s3:::jwt-api-terraform-state",
@@ -65,8 +104,18 @@
       "Effect": "Allow",
       "Action": [
         "autoscaling:CreateAutoScalingGroup",
+        "autoscaling:DeleteAutoScalingGroup",
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:UpdateAutoScalingGroup",
+        "autoscaling:CreateLaunchTemplate",
+        "autoscaling:DeleteLaunchTemplate",
+        "autoscaling:DescribeLaunchTemplates",
         "elasticloadbalancing:CreateLoadBalancer",
-        "elasticloadbalancing:DescribeLoadBalancers"
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:DeleteTargetGroup"
       ],
       "Resource": "*"
     }
