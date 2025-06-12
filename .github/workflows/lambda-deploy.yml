@@ -1,4 +1,4 @@
-name: Terraform Lambda Deploy
+name: Lambda Deploy
 
 on:
   push:
@@ -17,8 +17,8 @@ env:
   TERRAFORM_VERSION: '1.6.0'
 
 jobs:
-  terraform-deploy:
-    name: Terraform Infrastructure & Lambda Deploy
+  deploy:
+    name: Deploy Lambda Infrastructure & Code
     runs-on: ubuntu-latest
     
     steps:
@@ -46,20 +46,20 @@ jobs:
         
     - name: Install Parent POM
       run: |
-        echo "📦 Installing parent POM..."
+        echo "📦 Instalando Parent POM..."
         mvn clean install -N -B
-        echo "✅ Parent POM installed"
+        echo "✅ Parent POM instalado"
         
     - name: Build JWT Validation Library
       run: |
-        echo "📦 Building JWT Validation Library..."
+        echo "📦 Construindo JWT Validation Library..."
         cd jwt-validation-lib
         mvn clean install -DskipTests -B
-        echo "✅ JWT Validation Library built"
+        echo "✅ JWT Validation Library construída"
         
     - name: Build Lambda package
       run: |
-        echo "📦 Building Lambda package..."
+        echo "📦 Construindo pacote Lambda..."
         cd aws-lambda-jwt
         mvn clean package -DskipTests -B
         
@@ -75,37 +75,37 @@ jobs:
         
     - name: Terraform Init
       run: |
-        echo "🏗️ Initializing Terraform..."
+        echo "🏗️ Inicializando Terraform..."
         cd terraform/lambda-simple
         terraform init
         
     - name: Terraform Plan
       run: |
-        echo "📋 Planning Terraform changes..."
+        echo "📋 Planejando mudanças no Terraform..."
         cd terraform/lambda-simple
         terraform plan -detailed-exitcode
       continue-on-error: true
       
     - name: Terraform Apply
       run: |
-        echo "🚀 Applying Terraform infrastructure..."
+        echo "🚀 Aplicando infraestrutura Terraform..."
         cd terraform/lambda-simple
         terraform apply -auto-approve
         
         # Captura outputs importantes
-        echo "📤 Getting Terraform outputs..."
+        echo "📤 Obtendo outputs do Terraform..."
         FUNCTION_URL=$(terraform output -raw lambda_function_url 2>/dev/null || echo "not_available")
         echo "🔗 Function URL: $FUNCTION_URL"
         echo "FUNCTION_URL=$FUNCTION_URL" >> $GITHUB_ENV
         
     - name: Deploy Lambda Code
       run: |
-        echo "📦 Deploying Lambda code..."
+        echo "📦 Fazendo deploy do código Lambda..."
         cd aws-lambda-jwt
         
         # Encontra o JAR criado
         LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar 2>/dev/null | head -n 1)
-        echo "🚀 Deploying: $LAMBDA_JAR"
+        echo "🚀 Fazendo deploy: $LAMBDA_JAR"
         
         # Update Lambda function code
         aws lambda update-function-code \
@@ -116,11 +116,11 @@ jobs:
         aws lambda wait function-updated \
           --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
           
-        echo "✅ Lambda code deployed successfully!"
+        echo "✅ Código Lambda enviado com sucesso!"
         
     - name: Test Lambda function
       run: |
-        echo "🧪 Testing Lambda function..."
+        echo "🧪 Testando função Lambda..."
         
         # Cria arquivo temporário com payload de teste
         echo '{"token": "eyJhbGciOiJIUzI1NiJ9.eyJSb2xlIjoiQWRtaW4iLCJTZWVkIjoiNzg0MSIsIk5hbWUiOiJUb25pbmhvIEFyYXVqbyJ9.QY05sIjtrcJnP533kQNk8QXcaleJ1Q01jWY_ZzIZuAg"}' > test-payload.json
@@ -132,14 +132,14 @@ jobs:
           --cli-binary-format raw-in-base64-out \
           response.json
           
-        echo "📋 Lambda response:"
+        echo "📋 Resposta do Lambda:"
         cat response.json
         
         # Verifica se a resposta contém "valid"
         if grep -q '"valid"' response.json; then
-            echo "✅ Lambda responding correctly"
+            echo "✅ Lambda respondendo corretamente"
         else
-            echo "⚠️ Lambda response may be unexpected"
+            echo "⚠️ Resposta do Lambda pode estar inesperada"
         fi
         
         # Limpa arquivo temporário
@@ -147,47 +147,47 @@ jobs:
         
     - name: Test Function URL
       run: |
-        echo "🌐 Testing Function URL..."
+        echo "🌐 Testando Function URL..."
         
         if [ "$FUNCTION_URL" != "not_available" ]; then
             echo "🔗 Function URL: $FUNCTION_URL"
             
             # Test via HTTP with valid JWT
-            echo "🧪 Testing with valid JWT..."
+            echo "🧪 Testando com JWT válido..."
             curl -X POST "$FUNCTION_URL" \
               -H "Content-Type: application/json" \
               -d '{"token": "eyJhbGciOiJIUzI1NiJ9.eyJSb2xlIjoiQWRtaW4iLCJTZWVkIjoiNzg0MSIsIk5hbWUiOiJUb25pbmhvIEFyYXVqbyJ9.QY05sIjtrcJnP533kQNk8QXcaleJ1Q01jWY_ZzIZuAg"}' \
               -w "\n📊 Status: %{http_code}\n" \
-              -s | jq '.' || echo "Response is not JSON"
+              -s | jq '.' || echo "Resposta não é JSON"
               
             echo ""
-            echo "🧪 Testing with invalid JWT..."
+            echo "🧪 Testando com JWT inválido..."
             curl -X POST "$FUNCTION_URL" \
               -H "Content-Type: application/json" \
               -d '{"token": "invalid-token"}' \
               -w "\n📊 Status: %{http_code}\n" \
-              -s | jq '.' || echo "Response is not JSON"
+              -s | jq '.' || echo "Resposta não é JSON"
         else
-            echo "⚠️ Function URL not available from Terraform output"
+            echo "⚠️ Function URL não disponível do output do Terraform"
         fi
         
     - name: Deployment Summary
       run: |
-        echo "## 🎉 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## 🎉 Resumo do Deploy" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Infrastructure**: Created/Updated via Terraform" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Lambda Function**: Deployed and tested" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Function URL**: Available for HTTP requests" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Infraestrutura**: Criada/Atualizada via Terraform" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Função Lambda**: Deploy realizado e testada" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Function URL**: Disponível para requisições HTTP" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         if [ "$FUNCTION_URL" != "not_available" ]; then
             echo "🔗 **Function URL**: $FUNCTION_URL" >> $GITHUB_STEP_SUMMARY
         fi
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Test Commands:" >> $GITHUB_STEP_SUMMARY
+        echo "### Comandos de Teste:" >> $GITHUB_STEP_SUMMARY
         echo '```bash' >> $GITHUB_STEP_SUMMARY
         echo 'curl -X POST '"$FUNCTION_URL"' \' >> $GITHUB_STEP_SUMMARY
         echo '  -H "Content-Type: application/json" \' >> $GITHUB_STEP_SUMMARY
-        echo '  -d '\''{"token": "YOUR_JWT_TOKEN"}'\''' >> $GITHUB_STEP_SUMMARY
+        echo '  -d '\''{"token": "SEU_JWT_TOKEN"}'\''' >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
         
     - name: 🎉 Success Notification
