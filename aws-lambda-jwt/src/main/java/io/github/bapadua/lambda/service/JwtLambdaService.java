@@ -1,5 +1,10 @@
 package io.github.bapadua.lambda.service;
 
+import java.util.Map;
+
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.github.bapadua.jwt.lib.service.DefaultJwtValidationService;
 import io.github.bapadua.jwt.lib.service.JwtValidationService;
 import io.github.bapadua.jwt.lib.service.impl.DefaultJwtClaimsExtractor;
@@ -7,9 +12,6 @@ import io.github.bapadua.jwt.lib.service.impl.DefaultJwtClaimsValidator;
 import io.github.bapadua.jwt.lib.service.impl.DefaultPrimeNumberValidator;
 import io.github.bapadua.lambda.model.JwtValidationRequest;
 import io.github.bapadua.lambda.model.JwtValidationResponse;
-
-import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
-import java.util.Map;
 
 /**
  * Serviço responsável pela lógica de validação JWT no ambiente Lambda
@@ -121,20 +123,34 @@ public class JwtLambdaService {
         String body = event.getBody();
         if (body != null && !body.trim().isEmpty()) {
             try {
-                // Parser JSON simples para extrair token
-                if (body.contains("\"token\"")) {
-                    // Busca por "token":"valor" ou "token": "valor"
-                    String[] parts = body.split("\"token\"\\s*:\\s*\"");
-                    if (parts.length > 1) {
-                        String tokenPart = parts[1];
-                        int endIndex = tokenPart.indexOf("\"");
-                        if (endIndex > 0) {
-                            return tokenPart.substring(0, endIndex);
-                        }
+                // Usa Jackson para fazer parse do JSON
+                ObjectMapper objectMapper = new ObjectMapper();
+                Map<String, Object> bodyMap = objectMapper.readValue(body, Map.class);
+                
+                Object tokenObj = bodyMap.get("token");
+                if (tokenObj != null) {
+                    String token = tokenObj.toString();
+                    if (!token.trim().isEmpty()) {
+                        return token.trim();
                     }
                 }
             } catch (Exception e) {
-                // Se falhar no parse do JSON, continua sem o token do body
+                // Se falhar no parse do JSON, tenta com parser simples como fallback
+                try {
+                    if (body.contains("\"token\"")) {
+                        // Busca por "token":"valor" ou "token": "valor"
+                        String[] parts = body.split("\"token\"\\s*:\\s*\"");
+                        if (parts.length > 1) {
+                            String tokenPart = parts[1];
+                            int endIndex = tokenPart.indexOf("\"");
+                            if (endIndex > 0) {
+                                return tokenPart.substring(0, endIndex);
+                            }
+                        }
+                    }
+                } catch (Exception fallbackException) {
+                    // Se ambos falharem, continua sem o token do body
+                }
             }
         }
         

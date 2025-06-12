@@ -30,23 +30,13 @@ data "aws_iam_role" "existing_lambda_role" {
 }
 
 # ========================================
-# Código Placeholder
+# Código do Lambda (JAR real)
 # ========================================
 
 data "archive_file" "lambda_zip" {
   type        = "zip"
   output_path = "/tmp/lambda.zip"
-  
-  source {
-    content = <<EOF
-public class Handler {
-    public String handleRequest(Object input, Context context) {
-        return "JWT Lambda funcionando! Versão: " + System.getProperty("java.version");
-    }
-}
-EOF
-    filename = "Handler.java"
-  }
+  source_file = "../../aws-lambda-jwt/target/aws-lambda-jwt-0.0.1-SNAPSHOT.jar"
 }
 
 # ========================================
@@ -54,7 +44,7 @@ EOF
 # ========================================
 
 resource "aws_lambda_function" "jwt_lambda" {
-  function_name = "jwt-validator"
+  function_name = "jwt-validator-v2"
   role         = data.aws_iam_role.existing_lambda_role.arn
   handler      = var.lambda_handler
   runtime      = var.lambda_runtime
@@ -71,7 +61,7 @@ resource "aws_lambda_function" "jwt_lambda" {
   }
 
   tags = {
-    Name        = "jwt-validator"
+    Name        = "jwt-validator-v2"
     Environment = var.environment
     Project     = "jwt-validator"
   }
