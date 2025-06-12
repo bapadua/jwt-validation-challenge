@@ -1,0 +1,18 @@
+apiVersion: v2
+name: jwt-validation-api
+description: Um chart Helm para a API de validação de JSON Web Tokens
+type: application
+version: 0.1.0
+appVersion: "0.0.1-SNAPSHOT"
+keywords:
+  - jwt
+  - validation
+  - api
+  - spring-boot
+maintainers:
+  - name: bapadua
+    email: your-email@example.com
+sources:
+  - https://github.com/bapadua/josewebtoken
+home: https://github.com/bapadua/josewebtoken
+icon: https://avatars.githubusercontent.com/u/1?v=4 

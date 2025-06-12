@@ -1,0 +1,45 @@
+1. Obtenha a URL da aplicação executando estes comandos:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "jwt-validation-api.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+     NOTA: Pode levar alguns minutos para o LoadBalancer IP ficar disponível.
+           Você pode verificar o status executando 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "jwt-validation-api.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "jwt-validation-api.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "jwt-validation-api.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visite http://127.0.0.1:8080 para usar sua aplicação"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. Para verificar o status da aplicação:
+   kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "jwt-validation-api.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+3. Para verificar os logs da aplicação:
+   kubectl logs --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "jwt-validation-api.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+4. Para testar a aplicação (após configurar port-forward):
+   curl http://127.0.0.1:8080/actuator/health
+   curl http://127.0.0.1:8080/api/jwt/validate-optional
+
+Configurações aplicadas:
+- Imagem: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+- Replicas: {{ .Values.replicaCount }}
+{{- if .Values.autoscaling.enabled }}
+- Autoscaling habilitado: min={{ .Values.autoscaling.minReplicas }}, max={{ .Values.autoscaling.maxReplicas }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+- Ingress habilitado
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+- Monitoramento habilitado
+{{- end }} 
