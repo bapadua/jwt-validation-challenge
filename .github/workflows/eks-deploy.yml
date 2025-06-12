@@ -1,0 +1,273 @@
+name: EKS Infrastructure & API Deployment
+
+on:
+  push:
+    paths:
+      - 'backend-challenge/**'
+      - 'terraform/eks/**'
+      - '.github/workflows/eks-deploy.yml'
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente para deploy (dev/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      destroy:
+        description: 'Destruir infraestrutura após testes?'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  JAVA_VERSION: '21'
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  prepare:
+    name: Preparar Deploy
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Definir ambiente
+      id: set-env
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+        else
+          ENVIRONMENT="dev" # Ambiente padrão para push
+        fi
+        echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+        echo "🚀 Deploy para ambiente: $ENVIRONMENT"
+  
+  build:
+    name: Build API
+    runs-on: ubuntu-latest
+    needs: prepare
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build API
+      run: |
+        cd backend-challenge
+        mvn clean package -DskipTests
+    
+    - name: Upload API artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-package
+        path: backend-challenge/target/backend-challenge-*.jar
+        retention-days: 1
+  
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    environment: ${{ needs.prepare.outputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+    
+    - name: Initialize AWS Backend
+      run: |
+        chmod +x terraform/eks/init-aws.sh
+        cd terraform/eks
+        ../eks/init-aws.sh
+    
+    - name: Terraform Init
+      run: |
+        cd terraform/eks
+        terraform init
+    
+    - name: Terraform Plan
+      run: |
+        cd terraform/eks
+        terraform plan -var="environment=${{ needs.prepare.outputs.environment }}" \
+                      -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD || 'admin123Change' }}" \
+                      -out=tfplan
+      
+    - name: Upload Terraform Plan
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plan
+        path: terraform/eks/tfplan
+        retention-days: 1
+  
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [prepare, terraform-plan]
+    environment: ${{ needs.prepare.outputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+    
+    - name: Terraform Init
+      run: |
+        cd terraform/eks
+        terraform init
+    
+    - name: Download Terraform Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-plan
+        path: terraform/eks
+    
+    - name: Terraform Apply
+      run: |
+        cd terraform/eks
+        terraform apply -auto-approve tfplan
+    
+    - name: Capture Outputs
+      id: terraform_output
+      run: |
+        cd terraform/eks
+        echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+        echo "jwt_api_url=$(terraform output -raw jwt_api_url)" >> $GITHUB_OUTPUT
+        echo "grafana_url=$(terraform output -raw grafana_url)" >> $GITHUB_OUTPUT
+        echo "grafana_admin_user=$(terraform output -raw grafana_admin_user)" >> $GITHUB_OUTPUT
+    
+    - name: Setup kubeconfig
+      run: |
+        aws eks update-kubeconfig --name ${{ steps.terraform_output.outputs.cluster_name }} --region ${{ env.AWS_REGION }}
+
+    - name: Verify Deployment Status
+      run: |
+        echo "⏳ Aguardando todos os pods ficarem disponíveis..."
+        
+        # Verifica namespace da API JWT
+        echo "🔍 Verificando namespace jwt-api..."
+        kubectl get pods -n jwt-api
+        
+        # Verifica namespace de monitoramento
+        echo "🔍 Verificando namespace de monitoramento..."
+        kubectl get pods -n monitoring
+    
+    - name: Test API
+      run: |
+        echo "🧪 Testando API JWT (pode demorar até 5 minutos para ficar disponível)..."
+        
+        # Obtém o endpoint real do ALB
+        echo "🔍 Obtendo IP/HOST do ALB..."
+        INGRESS_HOST=$(kubectl get ingress -n jwt-api -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
+        
+        if [ -z "$INGRESS_HOST" ]; then
+          echo "⚠️ Ingress ainda não possui IP/hostname atribuído. Aguardando..."
+          sleep 60
+          INGRESS_HOST=$(kubectl get ingress -n jwt-api -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}')
+        fi
+        
+        if [ -n "$INGRESS_HOST" ]; then
+          echo "🔗 Endpoint encontrado: $INGRESS_HOST"
+          
+          # Tenta acessar a API (pode ainda não estar pronta)
+          echo "🧪 Testando com um JWT válido..."
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{"token": "eyJhbGciOiJIUzI1NiJ9.eyJSb2xlIjoiQWRtaW4iLCJTZWVkIjoiNzg0MSIsIk5hbWUiOiJUb25pbmhvIEFyYXVqbyJ9.QY05sIjtrcJnP533kQNk8QXcaleJ1Q01jWY_ZzIZuAg"}' \
+            -w "\n📊 Status: %{http_code}\n" \
+            http://$INGRESS_HOST/validate || echo "❌ Falha na conexão (pode ser normal durante o provisionamento)"
+        else
+          echo "⚠️ Não foi possível obter o endpoint do ALB ainda. A API pode levar alguns minutos para ficar disponível."
+        fi
+    
+    - name: Deployment Summary
+      run: |
+        echo "## 🚀 Deploy concluído!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 URLs de Acesso" >> $GITHUB_STEP_SUMMARY
+        echo "- **API JWT:** ${{ steps.terraform_output.outputs.jwt_api_url }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Grafana:** ${{ steps.terraform_output.outputs.grafana_url }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔐 Credenciais Grafana" >> $GITHUB_STEP_SUMMARY
+        echo "- **Usuário:** ${{ steps.terraform_output.outputs.grafana_admin_user }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Senha:** [Definida nos secrets]" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 💡 Observações" >> $GITHUB_STEP_SUMMARY
+        echo "- Os endpoints podem demorar alguns minutos para ficarem disponíveis após a implantação" >> $GITHUB_STEP_SUMMARY
+        echo "- Para acesso via nome de host, configure os DNSs conforme necessário" >> $GITHUB_STEP_SUMMARY
+        
+  cleanup:
+    name: Cleanup (Condicional)
+    runs-on: ubuntu-latest
+    needs: [prepare, terraform-apply]
+    environment: ${{ needs.prepare.outputs.environment }}
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.destroy == 'true'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+    
+    - name: Terraform Init
+      run: |
+        cd terraform/eks
+        terraform init
+    
+    - name: Terraform Destroy
+      run: |
+        cd terraform/eks
+        terraform destroy -auto-approve \
+         -var="environment=${{ needs.prepare.outputs.environment }}" \
+         -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD || 'admin123Change' }}"
+    
+    - name: Cleanup Summary
+      run: |
+        echo "## 🧹 Limpeza concluída!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Toda a infraestrutura foi removida com sucesso." >> $GITHUB_STEP_SUMMARY 

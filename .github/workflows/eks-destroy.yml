@@ -1,0 +1,206 @@
+name: EKS Infrastructure Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente para destruir (dev/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      confirmation:
+        description: 'Digite "DESTROY" para confirmar a destruição'
+        required: true
+        type: string
+      cleanup_backend:
+        description: 'Remover backend do Terraform (S3 e DynamoDB)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  JAVA_VERSION: '21'
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  validate:
+    name: Validar Destruição
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirmation == 'DESTROY' }}
+    outputs:
+      environment: ${{ github.event.inputs.environment }}
+      
+    steps:
+    - name: Verificar confirmação
+      run: |
+        echo "🚨 ATENÇÃO: Destruição do ambiente ${{ github.event.inputs.environment }} foi confirmada!"
+  
+  cleanup-cluster:
+    name: Limpar Recursos Kubernetes
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: ${{ needs.validate.outputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+    
+    - name: Terraform Init
+      run: |
+        cd terraform/eks
+        terraform init
+    
+    - name: Obter Nome do Cluster
+      id: cluster_name
+      run: |
+        cd terraform/eks
+        echo "cluster_name=$(terraform output -raw cluster_name 2>/dev/null || echo "jwt-api-cluster")" >> $GITHUB_OUTPUT
+      
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Configurar kubeconfig
+      run: |
+        aws eks update-kubeconfig --name ${{ steps.cluster_name.outputs.cluster_name }} --region ${{ env.AWS_REGION }}
+      
+    - name: Limpar recursos no cluster
+      run: |
+        echo "🧹 Removendo recursos do namespace jwt-api..."
+        kubectl delete namespace jwt-api --ignore-not-found=true
+        
+        echo "🧹 Removendo recursos do namespace monitoring..."
+        kubectl delete namespace monitoring --ignore-not-found=true
+        
+        echo "🧹 Removendo AWS Load Balancer Controller..."
+        kubectl delete deployment -n kube-system aws-load-balancer-controller --ignore-not-found=true
+        
+        echo "⏳ Aguardando finalização dos recursos..."
+        sleep 30
+  
+  terraform-destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    needs: [validate, cleanup-cluster]
+    environment: ${{ needs.validate.outputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+    
+    - name: Terraform Init
+      run: |
+        cd terraform/eks
+        terraform init
+    
+    - name: Terraform Destroy
+      run: |
+        cd terraform/eks
+        terraform destroy -auto-approve \
+          -var="environment=${{ needs.validate.outputs.environment }}" \
+          -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD || 'admin123Change' }}"
+    
+    - name: Verificar destruição
+      run: |
+        cd terraform/eks
+        if terraform state list &> /dev/null; then
+          echo "⚠️ Ainda existem recursos no state. Verifique manualmente."
+        else
+          echo "✅ Todos os recursos foram destruídos com sucesso!"
+        fi
+    
+    - name: Destruição Summary
+      run: |
+        echo "## 🧹 Destruição concluída!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Ambiente: **${{ needs.validate.outputs.environment }}**" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "A infraestrutura EKS foi removida com sucesso." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "⚠️ **Nota:** Recursos S3 e DynamoDB para o backend do Terraform não são excluídos automaticamente." >> $GITHUB_STEP_SUMMARY
+  
+  cleanup-backend:
+    name: Limpar Backend do Terraform
+    runs-on: ubuntu-latest
+    needs: terraform-destroy
+    if: ${{ github.event.inputs.cleanup_backend == 'true' }}
+    environment: ${{ needs.validate.outputs.environment }}
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Limpar S3 Bucket
+      run: |
+        # Definições de buckets e tabelas
+        BUCKET_NAME="jwt-api-terraform-state"
+        DYNAMODB_TABLE="jwt-api-terraform-locks"
+        
+        echo "🧹 Verificando se o bucket $BUCKET_NAME existe..."
+        if aws s3api head-bucket --bucket ${BUCKET_NAME} 2>/dev/null; then
+          echo "♻️ Limpando o conteúdo do bucket $BUCKET_NAME..."
+          aws s3 rm s3://${BUCKET_NAME}/eks/terraform.tfstate
+          aws s3 rm s3://${BUCKET_NAME}/eks/ --recursive
+          
+          echo "🗑️ Excluindo o bucket $BUCKET_NAME..."
+          aws s3api delete-bucket-policy --bucket ${BUCKET_NAME} || true
+          aws s3api delete-bucket --bucket ${BUCKET_NAME}
+          echo "✅ Bucket excluído com sucesso!"
+        else
+          echo "⚠️ Bucket $BUCKET_NAME não encontrado ou já excluído."
+        fi
+    
+    - name: Limpar DynamoDB
+      run: |
+        DYNAMODB_TABLE="jwt-api-terraform-locks"
+        
+        echo "🧹 Verificando se a tabela $DYNAMODB_TABLE existe..."
+        if aws dynamodb describe-table --table-name ${DYNAMODB_TABLE} 2>/dev/null; then
+          echo "🗑️ Excluindo tabela DynamoDB $DYNAMODB_TABLE..."
+          aws dynamodb delete-table --table-name ${DYNAMODB_TABLE}
+          echo "✅ Tabela excluída com sucesso!"
+        else
+          echo "⚠️ Tabela $DYNAMODB_TABLE não encontrada ou já excluída."
+        fi
+    
+    - name: Backend Summary
+      run: |
+        echo "## 🧹 Limpeza de Backend concluída!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Os seguintes recursos foram removidos:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **S3 Bucket**: jwt-api-terraform-state" >> $GITHUB_STEP_SUMMARY
+        echo "- **DynamoDB Table**: jwt-api-terraform-locks" >> $GITHUB_STEP_SUMMARY 
