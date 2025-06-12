@@ -100,23 +100,31 @@ jobs:
         
     - name: Deploy Lambda Code
       run: |
-        echo "📦 Fazendo deploy do código Lambda..."
-        cd aws-lambda-jwt
+        echo "📦 Verificando se precisa fazer deploy do código Lambda..."
         
-        # Encontra o JAR criado
-        LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar 2>/dev/null | head -n 1)
-        echo "🚀 Fazendo deploy: $LAMBDA_JAR"
-        
-        # Update Lambda function code
-        aws lambda update-function-code \
-          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-          --zip-file fileb://$LAMBDA_JAR
-          
-        # Wait for update to complete
-        aws lambda wait function-updated \
-          --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
-          
-        echo "✅ Código Lambda enviado com sucesso!"
+        # Verifica se a função existe
+        if aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} > /dev/null 2>&1; then
+            echo "✅ Função Lambda encontrada, fazendo update do código..."
+            cd aws-lambda-jwt
+            
+            # Encontra o JAR criado
+            LAMBDA_JAR=$(ls target/aws-lambda-jwt-*.jar 2>/dev/null | head -n 1)
+            echo "🚀 Fazendo deploy: $LAMBDA_JAR"
+            
+            # Update Lambda function code
+            aws lambda update-function-code \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --zip-file fileb://$LAMBDA_JAR
+              
+            # Wait for update to complete
+            aws lambda wait function-updated \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+              
+            echo "✅ Código Lambda atualizado com sucesso!"
+        else
+            echo "ℹ️ Função Lambda não existe ou foi criada pelo Terraform com o código já incluído"
+            echo "ℹ️ Pulando update separado do código..."
+        fi
         
     - name: Test Lambda function
       run: |
