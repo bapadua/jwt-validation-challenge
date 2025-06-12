@@ -230,7 +230,22 @@ jobs:
         terraform plan -var="environment=${{ needs.prepare.outputs.environment }}" \
                       -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD || 'admin123Change' }}" \
                       -out=tfplan
-      
+        
+        # Verifica se o plan foi gerado com sucesso
+        if [ ! -f "tfplan" ]; then
+          echo "❌ Arquivo tfplan não foi gerado. Falha no plan."
+          exit 1
+        fi
+        
+        # Verifica se o arquivo tem conteúdo válido
+        PLAN_SIZE=$(stat -c%s tfplan 2>/dev/null || stat -f%z tfplan 2>/dev/null || echo "0")
+        if [ "$PLAN_SIZE" -eq 0 ]; then
+          echo "❌ Arquivo tfplan está vazio. Falha no plan."
+          exit 1
+        fi
+        
+        echo "✅ Plan gerado com sucesso. Tamanho: $PLAN_SIZE bytes"
+    
     - name: Upload Terraform Plan
       uses: actions/upload-artifact@v4
       with:
@@ -293,6 +308,33 @@ jobs:
       with:
         name: terraform-plan
         path: terraform/eks
+    
+    - name: Verify Terraform Plan
+      run: |
+        cd terraform/eks
+        echo "🔍 Verificando arquivo tfplan..."
+        
+        if [ ! -f "tfplan" ]; then
+          echo "❌ Arquivo tfplan não encontrado após download"
+          exit 1
+        fi
+        
+        PLAN_SIZE=$(stat -c%s tfplan 2>/dev/null || stat -f%z tfplan 2>/dev/null || echo "0")
+        if [ "$PLAN_SIZE" -eq 0 ]; then
+          echo "❌ Arquivo tfplan está vazio após download"
+          exit 1
+        fi
+        
+        echo "✅ Arquivo tfplan válido. Tamanho: $PLAN_SIZE bytes"
+        
+        # Tenta validar o plan
+        terraform show tfplan > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+          echo "❌ Arquivo tfplan está corrompido ou inválido"
+          exit 1
+        fi
+        
+        echo "✅ Plan validado com sucesso"
     
     - name: Terraform Apply
       run: |
