@@ -321,37 +321,36 @@ terraform destroy -var="environment=dev" -var="grafana_admin_password=sua_senha_
 
 ### Troubleshooting do Terraform
 
-#### Problema: Lock do Estado
+#### 🔒 Problema: Lock do Estado Terraform
 
-**Erro**: `Error acquiring the state lock`
+**Erro**: `Error acquiring the state lock` ou `ConditionalCheckFailedException`
 
 Este erro ocorre quando uma operação anterior do Terraform não foi finalizada corretamente ou quando múltiplas execuções tentam acessar o estado simultaneamente.
 
-**Solução 1: Script Automático (Recomendado)**
-O workflow do GitHub Actions inclui limpeza automática de locks antes de executar o `terraform plan`.
+**Solução Rápida (Recomendada):**
+1. Acesse o **Console AWS** → **DynamoDB**
+2. Vá para a tabela `jwt-api-terraform-locks`
+3. Clique em **"Explorar itens de tabela"**
+4. Procure pelo item com **LockID**: `jwt-api-terraform-state/eks/terraform.tfstate`
+5. Selecione o item e clique em **"Excluir"**
 
-**Solução 2: Script Manual**
+**Solução via AWS CLI:**
 ```bash
-# Navegue para o diretório do Terraform
-cd terraform/eks
-
-# Execute o script de unlock
-chmod +x force-unlock.sh
-./force-unlock.sh
-```
-
-**Solução 3: Comando Direto**
-```bash
-# Verificar locks ativos
-aws dynamodb scan \
-  --table-name jwt-api-terraform-locks \
-  --select ALL_ATTRIBUTES
-
-# Remover lock específico (substitua pelo LockID do erro)
 aws dynamodb delete-item \
   --table-name jwt-api-terraform-locks \
   --key '{"LockID":{"S":"jwt-api-terraform-state/eks/terraform.tfstate"}}'
 ```
+
+**Solução via Script:**
+```bash
+cd terraform/eks
+./force-unlock.sh
+```
+
+**Prevenção:**
+- O workflow do GitHub Actions inclui limpeza automática de locks
+- Evite executar múltiplos pipelines simultaneamente
+- Aguarde a conclusão de um deploy antes de iniciar outro
 
 #### Problema: Permissões Insuficientes
 
