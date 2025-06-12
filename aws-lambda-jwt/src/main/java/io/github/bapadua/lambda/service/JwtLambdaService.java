@@ -63,6 +63,29 @@ public class JwtLambdaService {
     }
     
     /**
+     * Valida JWT a partir de um evento do API Gateway - Retorna apenas boolean
+     */
+    public boolean validateJwtFromApiGateway(APIGatewayProxyRequestEvent event) {
+        try {
+            String token = extractTokenFromApiGatewayEvent(event);
+            
+            if (token == null || token.trim().isEmpty()) {
+                return false;
+            }
+            
+            // Remove prefixo "Bearer " se presente
+            if (token.startsWith("Bearer ")) {
+                token = token.substring(7);
+            }
+            
+            return jwtValidationService.isValidJwt(token);
+            
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    /**
      * Valida JWT a partir de um evento do API Gateway
      */
     public JwtValidationResponse validateFromApiGateway(APIGatewayProxyRequestEvent event) {
