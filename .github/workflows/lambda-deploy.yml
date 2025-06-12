@@ -86,6 +86,26 @@ jobs:
         terraform plan -detailed-exitcode
       continue-on-error: true
       
+    - name: Cleanup existing resources (if any)
+      run: |
+        echo "🧹 Verificando e removendo recursos existentes..."
+        cd terraform/lambda-simple
+        
+        # Verifica se a função jwt-validator existe
+        if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
+          echo "⚠️ Função jwt-validator já existe. Removendo para evitar conflito..."
+          
+          # Remove Function URL se existir
+          aws lambda delete-function-url-config --function-name jwt-validator 2>/dev/null || echo "Function URL não encontrada"
+          
+          # Remove a função
+          aws lambda delete-function --function-name jwt-validator 2>/dev/null || echo "Falha ao remover função"
+          
+          echo "✅ Função removida com sucesso"
+        else
+          echo "ℹ️ Função jwt-validator não existe. Continuando..."
+        fi
+      
     - name: Terraform Apply
       run: |
         echo "🚀 Aplicando infraestrutura Terraform..."
