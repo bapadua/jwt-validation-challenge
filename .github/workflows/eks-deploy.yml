@@ -70,21 +70,30 @@ jobs:
     
     - name: Build Multi-Module Project
       run: |
+        # Mostra a estrutura do projeto
+        echo "📁 Estrutura do projeto:"
+        ls -la
+        
         # Executa o build na raiz do projeto para compilar todos os módulos
+        echo "🔨 Iniciando build multi-módulo..."
         mvn clean install -DskipTests
         
         # Verifica se o JAR foi gerado corretamente
+        echo "📦 Verificando backend-challenge:"
         ls -la backend-challenge/target/
         
         # Verifica se a biblioteca jwt-validation-lib foi compilada
         echo "🔍 Verificando se jwt-validation-lib foi compilada:"
         ls -la jwt-validation-lib/target/ || echo "❌ jwt-validation-lib não foi compilada"
         
-        # Verifica se o JAR da biblioteca existe
-        if [ -f "jwt-validation-lib/target/jwt-validation-lib-*.jar" ]; then
+        # Verifica se o JAR da biblioteca existe (usando find para wildcards)
+        if find jwt-validation-lib/target/ -name "jwt-validation-lib-*.jar" -type f | grep -q .; then
           echo "✅ jwt-validation-lib compilada com sucesso"
+          find jwt-validation-lib/target/ -name "jwt-validation-lib-*.jar" -type f
         else
           echo "❌ jwt-validation-lib não foi encontrada"
+          echo "📁 Conteúdo do diretório jwt-validation-lib/target/:"
+          ls -la jwt-validation-lib/target/ || echo "Diretório não existe"
           exit 1
         fi
     
