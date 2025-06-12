@@ -112,16 +112,137 @@ O usuário ou role IAM deve ter permissões para:
 - Gerenciar serviços de monitoramento
 - Configurar backend do Terraform (S3 e DynamoDB)
 
-#### Criar Política IAM
+#### Configuração das Políticas IAM
+
+O projeto inclui políticas IAM divididas em arquivos menores para evitar o limite de 2.048 caracteres das políticas inline. As políticas estão organizadas por serviço:
+
+**Arquivos de Política Disponíveis:**
+- `terraform/eks/policy-eks.json` - Permissões para EKS
+- `terraform/eks/policy-ec2.json` - Permissões para EC2 (inclui VPC, subnets, etc.)
+- `terraform/eks/policy-iam.json` - Permissões para IAM
+- `terraform/eks/policy-state.json` - Permissões para S3 e DynamoDB (backend Terraform)
+- `terraform/eks/policy-load.json` - Permissões para AutoScaling e Load Balancers
+
+#### Aplicando as Políticas ao Usuário
+
+**Opção 1: Políticas Inline (Recomendado para desenvolvimento)**
+
 ```bash
+# Navegue para o diretório das políticas
+cd terraform/eks
+
+# Aplique cada política separadamente
+aws iam put-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-name jwt-eks-policy \
+  --policy-document file://policy-eks.json
+
+aws iam put-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-name jwt-ec2-policy \
+  --policy-document file://policy-ec2.json
+
+aws iam put-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-name jwt-iam-policy \
+  --policy-document file://policy-iam.json
+
+aws iam put-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-name jwt-state-policy \
+  --policy-document file://policy-state.json
+
+aws iam put-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-name jwt-load-policy \
+  --policy-document file://policy-load.json
+```
+
+**Opção 2: Políticas Gerenciadas (Recomendado para produção)**
+
+```bash
+# Crie as políticas gerenciadas
 aws iam create-policy \
-  --policy-name TerraformEKSPolicy \
-  --policy-document file://terraform/eks/aws-terraform-policy.json
+  --policy-name jwt-eks-policy \
+  --policy-document file://policy-eks.json
+
+aws iam create-policy \
+  --policy-name jwt-ec2-policy \
+  --policy-document file://policy-ec2.json
+
+aws iam create-policy \
+  --policy-name jwt-iam-policy \
+  --policy-document file://policy-iam.json
+
+aws iam create-policy \
+  --policy-name jwt-state-policy \
+  --policy-document file://policy-state.json
+
+aws iam create-policy \
+  --policy-name jwt-load-policy \
+  --policy-document file://policy-load.json
+
+# Anexe as políticas ao usuário (substitua ACCOUNT_ID pela sua conta AWS)
+aws iam attach-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/jwt-eks-policy
 
 aws iam attach-user-policy \
-  --user-name seu-usuario \
-  --policy-arn arn:aws:iam::sua-conta:policy/TerraformEKSPolicy
+  --user-name jwt-lambda-cicd-user \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/jwt-ec2-policy
+
+aws iam attach-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/jwt-iam-policy
+
+aws iam attach-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/jwt-state-policy
+
+aws iam attach-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/jwt-load-policy
 ```
+
+#### Verificando as Políticas Aplicadas
+
+```bash
+# Listar políticas inline do usuário
+aws iam list-user-policies --user-name jwt-lambda-cicd-user
+
+# Listar políticas gerenciadas anexadas
+aws iam list-attached-user-policies --user-name jwt-lambda-cicd-user
+
+# Ver detalhes de uma política específica
+aws iam get-user-policy \
+  --user-name jwt-lambda-cicd-user \
+  --policy-name jwt-eks-policy
+```
+
+#### Troubleshooting de Permissões
+
+**Erro: "You are not authorized to perform this operation"**
+
+1. Verifique se o usuário tem as políticas aplicadas:
+   ```bash
+   aws iam list-user-policies --user-name jwt-lambda-cicd-user
+   ```
+
+2. Teste as permissões específicas:
+   ```bash
+   # Teste permissão EC2
+   aws ec2 describe-availability-zones
+   
+   # Teste permissão EKS
+   aws eks list-clusters
+   
+   # Teste permissão S3
+   aws s3 ls s3://jwt-api-terraform-state
+   ```
+
+3. Se necessário, adicione permissões específicas que estejam faltando.
+
+#### Criar Política IAM (Método Antigo - Não Recomendado)
 
 ### Recursos Criados
 
@@ -196,6 +317,121 @@ A aplicação expõe métricas via endpoint Prometheus em `/actuator/prometheus`
 ### Limpeza de Recursos
 ```bash
 terraform destroy -var="environment=dev" -var="grafana_admin_password=sua_senha_segura"
+```
+
+### Troubleshooting do Terraform
+
+#### Problema: Lock do Estado
+
+**Erro**: `Error acquiring the state lock`
+
+Este erro ocorre quando uma operação anterior do Terraform não foi finalizada corretamente ou quando múltiplas execuções tentam acessar o estado simultaneamente.
+
+**Solução 1: Script Automático (Recomendado)**
+O workflow do GitHub Actions inclui limpeza automática de locks antes de executar o `terraform plan`.
+
+**Solução 2: Script Manual**
+```bash
+# Navegue para o diretório do Terraform
+cd terraform/eks
+
+# Execute o script de unlock
+chmod +x force-unlock.sh
+./force-unlock.sh
+```
+
+**Solução 3: Comando Direto**
+```bash
+# Verificar locks ativos
+aws dynamodb scan \
+  --table-name jwt-api-terraform-locks \
+  --select ALL_ATTRIBUTES
+
+# Remover lock específico (substitua pelo LockID do erro)
+aws dynamodb delete-item \
+  --table-name jwt-api-terraform-locks \
+  --key '{"LockID":{"S":"jwt-api-terraform-state/eks/terraform.tfstate"}}'
+```
+
+#### Problema: Permissões Insuficientes
+
+**Erro**: `You are not authorized to perform this operation`
+
+1. **Verifique se as políticas IAM foram aplicadas**:
+   ```bash
+   aws iam list-user-policies --user-name jwt-lambda-cicd-user
+   ```
+
+2. **Teste permissões específicas**:
+   ```bash
+   # EC2
+   aws ec2 describe-availability-zones
+   
+   # EKS
+   aws eks list-clusters
+   
+   # S3
+   aws s3 ls s3://jwt-api-terraform-state
+   ```
+
+3. **Reaplique as políticas se necessário** (veja seção "Configuração das Políticas IAM")
+
+#### Problema: Build Multi-Módulo Maven
+
+**Erro**: `Could not find artifact jwt-validation-lib`
+
+O projeto é um multi-módulo Maven. Certifique-se de executar o build na raiz:
+```bash
+# ✅ Correto - na raiz do projeto
+mvn clean install -DskipTests
+
+# ❌ Incorreto - apenas no backend-challenge
+cd backend-challenge && mvn clean package -DskipTests
+```
+
+#### Problema: Timeout no Deploy
+
+**Sintomas**: Deploy trava ou falha após muito tempo
+
+1. **Verifique recursos AWS**:
+   ```bash
+   # Verificar se o cluster EKS está saudável
+   aws eks describe-cluster --name jwt-api-cluster
+   
+   # Verificar nós do cluster
+   kubectl get nodes
+   ```
+
+2. **Verifique logs do Kubernetes**:
+   ```bash
+   # Logs dos pods da API
+   kubectl logs -n jwt-api -l app=jwt-api
+   
+   # Logs do load balancer controller
+   kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+   ```
+
+#### Comandos Úteis para Debug
+
+```bash
+# Verificar estado do Terraform
+terraform show
+
+# Verificar outputs
+terraform output
+
+# Verificar recursos criados
+terraform state list
+
+# Verificar logs do workflow
+# (no GitHub Actions, clique em "View workflow run" > "Build" > "View logs")
+
+# Verificar cluster EKS
+aws eks describe-cluster --name jwt-api-cluster --query 'cluster.status'
+
+# Verificar ingress
+kubectl get ingress -n jwt-api
+kubectl describe ingress -n jwt-api
 ```
 
 ## ⚡ Infraestrutura Lambda
