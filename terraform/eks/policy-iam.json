@@ -22,7 +22,20 @@
         "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies",
         "iam:GetUser",
-        "iam:GetCallerIdentity"
+        "iam:GetCallerIdentity",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:GetPolicy",
+        "iam:ListPolicyVersions",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:GetPolicyVersion",
+        "iam:ListEntitiesForPolicy",
+        "iam:ListPolicies",
+        "iam:TagPolicy",
+        "iam:UntagPolicy"
       ],
       "Resource": "*"
     }

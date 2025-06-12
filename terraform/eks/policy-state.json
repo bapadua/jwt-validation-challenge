@@ -14,7 +14,8 @@
         "dynamodb:PutItem",
         "dynamodb:CreateTable",
         "dynamodb:DeleteTable",
-        "dynamodb:DescribeTable"
+        "dynamodb:DescribeTable",
+        "dynamodb:DeleteItem"
       ],
       "Resource": [
         "arn:aws:s3:::jwt-api-terraform-state",
