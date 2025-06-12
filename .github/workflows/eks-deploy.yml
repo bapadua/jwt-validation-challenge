@@ -4,8 +4,10 @@ on:
   push:
     paths:
       - 'backend-challenge/**'
+      - 'jwt-validation-lib/**'
       - 'terraform/eks/**'
       - '.github/workflows/eks-deploy.yml'
+      - 'pom.xml'
     branches: [ main ]
   workflow_dispatch:
     inputs:
@@ -66,10 +68,25 @@ jobs:
         distribution: 'temurin'
         cache: maven
     
-    - name: Build API
+    - name: Build Multi-Module Project
       run: |
-        cd backend-challenge
-        mvn clean package -DskipTests
+        # Executa o build na raiz do projeto para compilar todos os módulos
+        mvn clean install -DskipTests
+        
+        # Verifica se o JAR foi gerado corretamente
+        ls -la backend-challenge/target/
+        
+        # Verifica se a biblioteca jwt-validation-lib foi compilada
+        echo "🔍 Verificando se jwt-validation-lib foi compilada:"
+        ls -la jwt-validation-lib/target/ || echo "❌ jwt-validation-lib não foi compilada"
+        
+        # Verifica se o JAR da biblioteca existe
+        if [ -f "jwt-validation-lib/target/jwt-validation-lib-*.jar" ]; then
+          echo "✅ jwt-validation-lib compilada com sucesso"
+        else
+          echo "❌ jwt-validation-lib não foi encontrada"
+          exit 1
+        fi
     
     - name: Upload API artifact
       uses: actions/upload-artifact@v4
