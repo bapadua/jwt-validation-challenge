@@ -44,7 +44,7 @@ data "archive_file" "lambda_zip" {
 # ========================================
 
 resource "aws_lambda_function" "jwt_lambda" {
-  function_name = "jwt-validator-v2"
+  function_name = "jwt-validator"
   role         = data.aws_iam_role.existing_lambda_role.arn
   handler      = var.lambda_handler
   runtime      = var.lambda_runtime
@@ -61,7 +61,7 @@ resource "aws_lambda_function" "jwt_lambda" {
   }
 
   tags = {
-    Name        = "jwt-validator-v2"
+    Name        = "jwt-validator"
     Environment = var.environment
     Project     = "jwt-validator"
   }
