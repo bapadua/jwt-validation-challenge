@@ -75,28 +75,34 @@ jobs:
         echo "Recursos no estado:"
         terraform state list 2>/dev/null || echo "Estado vazio"
         
-    - name: Import Resources (if requested)
-      if: github.event.inputs.force_import == 'true'
+    - name: Import Resources (automatic)
       run: |
-        echo "📥 Tentando importar recursos existentes..."
+        echo "📥 Importando recursos existentes automaticamente..."
         cd terraform/lambda-simple
         
-        # Verificar se jwt-validator existe
+        # Sempre tenta importar recursos existentes antes de destruir
         if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
           echo "✅ Função jwt-validator encontrada. Importando..."
-          terraform import aws_lambda_function.jwt_lambda jwt-validator || echo "❌ Falha ao importar função Lambda"
+          terraform import aws_lambda_function.jwt_lambda jwt-validator 2>/dev/null || echo "Recurso já importado ou falha no import"
           
           # Importar Function URL se existir
           if aws lambda get-function-url-config --function-name jwt-validator >/dev/null 2>&1; then
             echo "✅ Function URL encontrada. Importando..."
-            terraform import aws_lambda_function_url.jwt_lambda_url jwt-validator || echo "❌ Falha ao importar Function URL"
+            terraform import aws_lambda_function_url.jwt_lambda_url jwt-validator 2>/dev/null || echo "Recurso já importado ou falha no import"
           fi
         else
-          echo "⚠️ Função jwt-validator não encontrada para importar"
+          echo "⚠️ Função jwt-validator não encontrada"
         fi
         
-        echo "Estado após import:"
-        terraform state list
+        echo "Estado após import automático:"
+        terraform state list 2>/dev/null || echo "Estado ainda vazio"
+        
+    - name: Import Resources (if requested)
+      if: github.event.inputs.force_import == 'true'
+      run: |
+        echo "📥 Import adicional solicitado pelo usuário..."
+        cd terraform/lambda-simple
+        echo "ℹ️ Import automático já foi executado no step anterior"
         
     - name: Terraform Plan Destroy
       run: |
@@ -111,34 +117,51 @@ jobs:
         echo "🗑️ Destruindo infraestrutura..."
         cd terraform/lambda-simple
         
-        # Se o Terraform plan funcionou e há recursos no estado, usar Terraform
-        if [ "${{ steps.plan_destroy.outcome }}" = "success" ] && [ -n "$(terraform state list)" ]; then
-          echo "🎯 Destruindo via Terraform..."
-          terraform destroy -auto-approve
+        # Verifica se há recursos no state
+        STATE_RESOURCES=$(terraform state list 2>/dev/null | wc -l)
+        
+        if [ "$STATE_RESOURCES" -gt 0 ]; then
+          echo "🎯 Encontrados $STATE_RESOURCES recursos no state. Destruindo via Terraform..."
+          terraform destroy -auto-approve || echo "❌ Falha no Terraform destroy, tentando fallback..."
+        fi
+        
+        # Sempre executa cleanup via AWS CLI como garantia
+        echo "🧹 Executando cleanup via AWS CLI como garantia..."
+        
+        # Remover jwt-validator especificamente
+        if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
+          echo "🗑️ Removendo Function URL de jwt-validator..."
+          aws lambda delete-function-url-config --function-name jwt-validator 2>/dev/null || echo "Function URL não encontrada ou já removida"
+          
+          echo "🗑️ Removendo Lambda Function jwt-validator..."
+          aws lambda delete-function --function-name jwt-validator 2>/dev/null || echo "Função não encontrada ou já removida"
         else
-          echo "⚠️ Estado Terraform vazio ou plan falhou. Usando AWS CLI..."
-          
-          # Remover jwt-validator especificamente
-          if aws lambda get-function --function-name jwt-validator >/dev/null 2>&1; then
-            echo "🗑️ Removendo Function URL..."
-            aws lambda delete-function-url-config --function-name jwt-validator 2>/dev/null || echo "Function URL não encontrada"
-            
-            echo "🗑️ Removendo Lambda Function jwt-validator..."
-            aws lambda delete-function --function-name jwt-validator 2>/dev/null || echo "Falha ao remover função"
-          else
-            echo "⚠️ Função jwt-validator não encontrada"
-          fi
-          
-          # Remover outras funções JWT se existirem
-          OTHER_FUNCTIONS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`) && FunctionName != `jwt-validator`].FunctionName' --output text 2>/dev/null || echo "")
+          echo "✅ Função jwt-validator já removida ou não existe"
+        fi
+        
+        # Remover outras funções JWT se existirem
+        echo "🔍 Verificando outras funções JWT..."
+        OTHER_FUNCTIONS=$(aws lambda list-functions --query 'Functions[?contains(FunctionName, `jwt`)].FunctionName' --output text 2>/dev/null || echo "")
+        if [ -n "$OTHER_FUNCTIONS" ]; then
           for func in $OTHER_FUNCTIONS; do
-            if [ -n "$func" ]; then
+            if [ -n "$func" ] && [ "$func" != "None" ]; then
               echo "🗑️ Removendo função adicional: $func"
               aws lambda delete-function-url-config --function-name "$func" 2>/dev/null || echo "Function URL não encontrada"
-              aws lambda delete-function --function-name "$func" 2>/dev/null || echo "Falha ao remover função"
+              aws lambda delete-function --function-name "$func" 2>/dev/null || echo "Falha ao remover função $func"
             fi
           done
+        else
+          echo "✅ Nenhuma função JWT adicional encontrada"
         fi
+        
+        # Limpar state do Terraform
+        echo "🧹 Limpando state do Terraform..."
+        terraform state list 2>/dev/null | while read resource; do
+          if [ -n "$resource" ]; then
+            echo "Removendo $resource do state..."
+            terraform state rm "$resource" 2>/dev/null || echo "Falha ao remover $resource do state"
+          fi
+        done
         
     - name: Verify Cleanup
       run: |
