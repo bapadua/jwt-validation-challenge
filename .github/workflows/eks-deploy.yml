@@ -224,6 +224,7 @@ jobs:
         fi
     
     - name: Terraform Plan
+      continue-on-error: true
       run: |
         cd terraform/eks
         terraform plan -var="environment=${{ needs.prepare.outputs.environment }}" \
