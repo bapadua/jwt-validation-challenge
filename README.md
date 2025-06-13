@@ -1,3 +1,8 @@
+## O desenvolvedor
+
+Utilizei cursor ai para o prompt, optei por criar uma lib e utilizar em dois exemplos, api, e lambda.
+
+
 # JWT Validation API - Documentação Consolidada
 
 Este projeto implementa uma API REST para validação de JSON Web Tokens (JWT) com múltiplas opções de deploy e infraestrutura.
